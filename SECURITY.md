@@ -13,6 +13,8 @@
 - Notion authorization asks users to choose an accessible page; the app creates a new database there and does not modify an existing database.
 - The app includes host validation, a restrictive Content Security Policy, HSTS in production, no CORS allowlist, no-store API responses, streamed and size-capped HTML downloads, public-address checks to reduce SSRF risk, and conservative request timeouts.
 - User can disconnect Notion and request account deletion.
+- Deadline digests are opt-in and user-configured, support up to 10 email recipients, BCC additional recipients, and use provider idempotency keys. Recipient lists are stored per account and never placed in search queries.
+- Application status changes are scoped to the authenticated user's opportunity rows. Only Pending records are automatically changed to Deadline Passed after their deadline; Waiting/Done/Accepted/Rejected records are not overwritten.
 
 ## Before public production launch
 
@@ -23,6 +25,7 @@
 5. Configure provider-side secret management, secret rotation, access reviews, and alerts for unusual OAuth or account activity. Keep the encryption key separate from database backups.
 6. Define and publish a privacy policy, terms, retention schedule, data-processing disclosures for Notion and the search provider, and a security contact. Confirm local legal obligations before accepting users globally.
 7. Add structured audit events that never contain tokens, passwords, full academic profiles, or private Notion page contents.
+8. Configure a verified Resend sender/domain before enabling user email digests; publish an unsubscribe/preferences process and honour delivery bounces/complaints. Never send reminders unless a user has explicitly enabled them and confirmed the recipient addresses.
 8. Add a shared opportunity cache only after a separate privacy review. The current design searches separately per user and does not expose one user's profile or stored records to another.
 9. Consider requiring email verification before Notion authorization. Add CAPTCHA or additional abuse controls if public registration is targeted.
 10. Pin and update dependencies through Dependabot/Renovate, run `pip-audit` in CI, and review Notion API version changes before upgrading.
