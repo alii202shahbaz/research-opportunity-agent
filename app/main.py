@@ -135,26 +135,24 @@ def healthz():
     return {"status": "ok"}
 
 
-@app.get("/api/cron/{hour}", include_in_schema=False)
-def scheduled_worker(hour: str, request: Request):
-    # Twenty-four daily Vercel Hobby cron entries call this route once in each UTC hour.
-    if not re.fullmatch(r"(?:[01]\d|2[0-3])", hour):
-        raise HTTPException(status_code=404, detail="Unknown scheduler slot")
+@app.get("/api/cron/worker", include_in_schema=False)
+def scheduled_worker(request: Request):
+    """Vercel Schedules invokes this protected endpoint every 15 minutes."""
     if not settings.cron_secret:
         raise HTTPException(status_code=503, detail="Background scheduler is not configured")
     supplied = request.headers.get("authorization", "")
     if not hmac.compare_digest(supplied, f"Bearer {settings.cron_secret}"):
         raise HTTPException(status_code=401, detail="Unauthorized")
+
     from app.scheduler import claim_due_users, process_user
-    processed = []
-    for _ in range(1):
-        user_ids = claim_due_users(limit=1)
-        if not user_ids:
-            break
-        process_user(user_ids[0])
-        processed.append(user_ids[0][:8])
-    logger.info("Hourly scheduler slot %s processed %s user(s)", hour, len(processed))
-    return {"ok": True, "slot": hour, "processed": len(processed)}
+    user_ids = claim_due_users(limit=1)
+    if not user_ids:
+        return {"ok": True, "processed": 0}
+
+    user_id = user_ids[0]
+    process_user(user_id)
+    logger.info("Vercel Schedules worker processed user %s", user_id[:8])
+    return {"ok": True, "processed": 1}
 
 @app.get("/api/csrf")
 def csrf_token(request: Request, response: Response):
