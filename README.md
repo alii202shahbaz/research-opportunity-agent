@@ -14,7 +14,7 @@ A multi-user web application that collects an individual's academic profile, dis
 - Notion OAuth: users authorize a public integration, select an accessible parent page, and create a dedicated structured database under that page. No user is asked to paste an API token.
 - AES-256-GCM encryption for Notion access/refresh tokens at rest; HMAC-peppered hashes for app session tokens and OAuth state.
 - HTTP-only session cookie, CSRF protection, strict security headers, host validation, account deletion, and Notion disconnect/revocation.
-- A database-backed scheduler processes each user's local-time schedule. Vercel Cron uses 24 UTC-hour slots (one daily invocation per slot) to check due work hourly on the Hobby plan; each user's discovery itself runs once daily according to their profile. Hobby cron execution can start anywhere within its scheduled UTC hour.
+- A database-backed scheduler processes each user's local-time schedule. A single Vercel Schedule polls the protected worker endpoint every 15 minutes. Each user's discovery still runs once daily at the saved local-time target; the next poll picks up the due job, normally within 15 minutes.
 - The web app is deployed as a Vercel Python Function; Supabase Free provides PostgreSQL.
 
 ## Architecture
@@ -31,7 +31,7 @@ PostgreSQL (tenant-scoped records) <---------- Notion workspace per user
   ^
   | SELECT ... FOR UPDATE SKIP LOCKED (job lease)
   |
-Vercel Cron (24 UTC-hourly slots; protected worker route)
+Vercel Schedules (15-minute protected worker poll)
   |-- Tavily Search API (queries contain broad interests, degree level, academic year and semester number, graduation year, and preferred countries)
   |-- bounded HTML fetch + BeautifulSoup extraction
   |-- Pydantic validation and profile matching
@@ -97,12 +97,12 @@ This is a $0 hobby/portfolio deployment path. Vercel Hobby is intended for perso
    - `APP_SECRET_KEY` and `TOKEN_ENCRYPTION_KEY` = two independent random secrets (generate them locally with Python; do not reuse one for both)
    - `NOTION_OAUTH_CLIENT_ID`, `NOTION_OAUTH_CLIENT_SECRET`, and `TAVILY_API_KEY`
    - Email: `EMAIL_PROVIDER=smtp`, `EMAIL_FROM`, `GMAIL_USER`, and `GMAIL_APP_PASSWORD` for Gmail SMTP (or `RESEND_API_KEY` plus `EMAIL_FROM` for Resend).
-4. Vercel Cron reads Production environment variables directly from Vercel. GitHub Actions secrets are not required for the scheduled worker; the separate CI workflow only runs tests and dependency audits.
+4. Vercel Schedules calls the protected worker path every 15 minutes and sends `Authorization: Bearer $CRON_SECRET`. Keep `CRON_SECRET` set as a Vercel Production environment variable. GitHub Actions secrets are not required for the scheduled worker; the separate CI workflow only runs tests and dependency audits.
 5. In the Notion Developer Portal, register the exact production callback URL from step 3. Keep the integration's capabilities limited to the required read/insert/update content access.
-6. Vercel automatically registers the 24 hourly entries in `vercel.json` on Hobby. **Discover Now** processes immediately in the authenticated application request; it does not wait for the next cron slot. Manual discovery has a 15-minute per-account cooldown shown in the dashboard.
+6. Vercel automatically registers the static schedule in `vercel.json`: one protected worker poll every 15 minutes. On each tick, the app claims one due user and processes that job. **Discover Now** is separate and processes immediately in the authenticated application request; it does not wait for the next schedule tick. Manual discovery has a 15-minute per-account cooldown shown in the dashboard.
 7. Open the Vercel URL, register a test account, save a profile, connect Notion, and run a manual discovery. Check `/healthz` and the Vercel runtime logs.
 
-**Free-tier limitations:** Vercel Hobby is non-commercial and subject to monthly usage limits; Vercel Functions have a maximum execution duration. Supabase Free can pause after inactivity and provides no automatic backups. Vercel Hobby cron invocations are best-effort and can be delayed within the UTC hour; Vercel does not automatically retry a failed cron invocation. Back up the database yourself and do not treat this stack as production-grade hosting for sensitive/high-stakes workloads. No Render resources are needed for this deployment path.
+**Free-tier limitations:** Vercel Hobby is non-commercial and subject to monthly usage limits; Vercel Functions have a maximum execution duration. Supabase Free can pause after inactivity and provides no automatic backups. Vercel Schedules is in public beta. The 15-minute poll uses approximately 2,880 runs in a 30-day month, below the published Hobby allowance of 5,000 schedule runs per month. Schedule dispatch is not a hard real-time guarantee; failed invocations are not automatically retried. Back up the database yourself and do not treat this stack as production-grade hosting for sensitive/high-stakes workloads. No Render resources are needed for this deployment path.
 
 ## Environment variables
 
@@ -152,7 +152,7 @@ GitHub Actions runs the test suite and a `pip-audit` dependency vulnerability ch
 
 ## Recovery, Notion mirroring, and data retention
 
-- The application uses the 24-entry Vercel Hobby cron schedule to check due automatic runs once per UTC hour. Hobby execution may drift within the scheduled hour and does not automatically retry a failed invocation. Manual **Discover Now** is separate: it starts immediately in the web request and is protected by a 15-minute per-account cooldown. These requests also help keep a Supabase Free project active, but Supabase says activity thresholds are not guaranteed; a Free project can still be paused after a low-activity week. A few real database requests per day are usually enough, not a promise. See the [Supabase inactivity guidance](https://supabase.com/docs/guides/platform/free-project-pausing).
+- The application uses one Vercel Schedule to check due automatic runs every 15 minutes. Each tick claims one due user using a database lease, then runs discovery and Notion synchronization. Scheduled work is picked up at the next tick, normally within 15 minutes of the user's saved local time. Manual **Discover Now** is separate: it starts immediately in the web request and is protected by a 15-minute per-account cooldown. These requests also help keep a Supabase Free project active, but Supabase says activity thresholds are not guaranteed; a Free project can still be paused after a low-activity week. A few real database requests per day are usually enough, not a promise. See the [Supabase inactivity guidance](https://supabase.com/docs/guides/platform/free-project-pausing).
 - When a profile and Notion credentials have already been loaded successfully, new discoveries are mirrored to Notion before the app attempts to persist them in PostgreSQL. If that PostgreSQL write fails, the worker attempts an opt-in recovery email containing the current run's findings, then leaves the job lease to expire so a later worker can retry.
 - Recovery email uses the user's saved email opt-in and recipient list plus the configured email sender (Gmail SMTP or Resend). It is not sent when email reminders are disabled or the provider is not configured.
 - This is a best-effort fallback for a database write failure during an active run, **not** full protection against a total database outage. If PostgreSQL is unavailable before the worker can load the user profile, Notion token, or recipients, the worker cannot identify which user to process or authenticate to Notion. A separate durable configuration/credential store and an independent backup/restore process would be required for that stronger guarantee.
