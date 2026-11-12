@@ -122,7 +122,28 @@ def exchange_code(db: Session, user: User, code: str) -> NotionConnection:
     with _client() as client:
         response = client.post(f"{NOTION_API}/oauth/token", headers=_oauth_headers(), json=payload)
     if response.status_code >= 400:
-        raise NotionAPIError("Notion authorization exchange failed. Check the OAuth redirect URI and integration settings.")
+        # Notion rejects invalid/mismatched OAuth clients with HTTP 401.
+        # Log only the provider error code; never log credentials or token bodies.
+        try:
+            provider_error = str(response.json().get("error", "unknown"))[:80]
+        except (ValueError, AttributeError):
+            provider_error = "unparseable_response"
+        logger.warning(
+            "Notion OAuth token exchange rejected (HTTP %s, provider_error=%s)",
+            response.status_code,
+            provider_error,
+        )
+        if response.status_code == 401:
+            raise NotionAPIError(
+                "Notion rejected the OAuth client credentials (401). "
+                "Confirm that NOTION_OAUTH_CLIENT_ID and NOTION_OAUTH_CLIENT_SECRET "
+                "belong to the same public connection, and that its redirect URI "
+                "exactly matches NOTION_REDIRECT_URI."
+            )
+        raise NotionAPIError(
+            f"Notion authorization exchange failed (HTTP {response.status_code}, {provider_error}). "
+            "Check the OAuth redirect URI and integration settings."
+        )
     data = response.json()
     access = data.get("access_token")
     workspace_id = data.get("workspace_id")
