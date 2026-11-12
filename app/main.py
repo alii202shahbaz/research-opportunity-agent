@@ -390,6 +390,7 @@ def run_now(
     context=Depends(require_auth_csrf),
     db: Session = Depends(get_db),
 ):
+    enforce_rate_limit(request, "run_now", 4, 3600)
     user, _session = context
     profile = db.scalar(select(UserProfile).where(UserProfile.user_id == user.id).with_for_update())
     if not profile or not profile.interests_json or profile.interests_json == "[]":
