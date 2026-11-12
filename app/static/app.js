@@ -3,6 +3,10 @@ let csrfToken = "";
 let authMode = "login";
 let selectedParentPage = null;
 let pageCache = [];
+const IDLE_TIMEOUT_MS = 10 * 60 * 1000;
+let lastActivityAt = Date.now();
+let sessionWatchTimer = null;
+let lastSessionPingAt = Date.now();
 
 function toast(message, error = false) {
   const el = $("toast");
@@ -62,6 +66,43 @@ function showAuth() {
   $("dashboardView").classList.add("hidden");
   $("accountNav").classList.add("hidden");
 }
+function stopSessionWatch() {
+  if (sessionWatchTimer) window.clearInterval(sessionWatchTimer);
+  sessionWatchTimer = null;
+}
+async function endSessionForIdle() {
+  stopSessionWatch();
+  try { await api("/api/logout", { method: "POST", body: "{}" }); } catch (_) {}
+  showAuth();
+  try { await initCsrf(); } catch (_) {}
+  toast("You were signed out after 10 minutes of inactivity.");
+}
+function startSessionWatch() {
+  stopSessionWatch();
+  lastActivityAt = Date.now();
+  lastSessionPingAt = Date.now();
+  const markActivity = () => { lastActivityAt = Date.now(); };
+  ["pointerdown", "keydown", "touchstart", "scroll", "mousemove"].forEach((eventName) => {
+    window.addEventListener(eventName, markActivity, { passive: true });
+  });
+  sessionWatchTimer = window.setInterval(async () => {
+    const now = Date.now();
+    if (now - lastActivityAt >= IDLE_TIMEOUT_MS) {
+      await endSessionForIdle();
+      return;
+    }
+    if (now - lastSessionPingAt >= 4 * 60 * 1000) {
+      try {
+        await api("/api/me");
+        lastSessionPingAt = Date.now();
+      } catch (_) {
+        stopSessionWatch();
+        showAuth();
+        toast("Your session expired. Please sign in again.", true);
+      }
+    }
+  }, 15000);
+}
 function fillProfile(p) {
   if (!p) return;
   const configured = (p.interests || []).length > 0;
@@ -90,6 +131,12 @@ function fillProfile(p) {
   $("profileSaved").textContent = configured ? "Configured" : "Not configured";
   $("profileSaved").classList.toggle("ok", configured);
   if (p.last_run_summary) $("runSummary").textContent = `${p.last_run_status || "Last run"}: ${p.last_run_summary}`;
+  if (p.next_run_at) {
+    const nextRun = new Date(p.next_run_at);
+    $("scheduleStatus").textContent = `Next scheduled run: ${nextRun.toLocaleString(undefined, { timeZone: p.timezone_name || "UTC", dateStyle: "medium", timeStyle: "short" })} (${p.timezone_name || "UTC"})`;
+  } else {
+    $("scheduleStatus").textContent = p.automation_enabled ? "Next run is being scheduled…" : "Automatic discovery is off.";
+  }
 }
 function renderNotion(n) {
   if (!n || !n.connected) {
@@ -183,12 +230,13 @@ $("authForm").addEventListener("submit", async (event) => {
   try {
     await api(authMode === "login" ? "/api/login" : "/api/register", { method: "POST", body: JSON.stringify(payload) });
     await initCsrf();
-    showDashboard();
     await loadDashboard();
+    startSessionWatch();
     toast(authMode === "login" ? "Signed in." : "Account created. Complete your profile to begin.");
   } catch (err) { $("authError").textContent = err.message; }
 });
 $("logoutBtn").addEventListener("click", async () => {
+  stopSessionWatch();
   try { await api("/api/logout", { method: "POST", body: "{}" }); } catch (_) {}
   showAuth(); await initCsrf();
 });
@@ -264,8 +312,8 @@ $("deleteAccountBtn").addEventListener("click", async () => {
 (async function boot() {
   renderHourOptions();
   $("timezone").value = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
-  try { await initCsrf(); await loadDashboard(); }
-  catch (_) { showAuth(); }
+  try { await initCsrf(); await loadDashboard(); startSessionWatch(); }
+  catch (_) { showAuth(); stopSessionWatch(); }
   finally { $("loadingView").classList.add("hidden"); }
   const params = new URLSearchParams(window.location.search);
   if (params.get("notion") === "connected") { toast("Notion connected. Choose a page to create your database."); history.replaceState({}, "", "/"); try { await refreshMe(); } catch (_) {} }
