@@ -9,3 +9,11 @@
 .loading-view p{margin:0}
 .loading-indicator{width:18px;height:18px;border:2px solid #dce3ef;border-top-color:var(--blue);border-radius:50%;animation:loading-spin .8s linear infinite}
 @keyframes loading-spin{to{transform:rotate(360deg)}}
+
+.form-section{grid-column:1/-1;display:grid;grid-template-columns:1fr 1fr;gap:0 14px;min-width:0;border:1px solid var(--line);border-radius:12px;padding:16px;margin:0 0 4px;background:#fff}
+.form-section legend{padding:0 8px;font-size:13px;font-weight:800;color:#34476d}
+.form-section>div{min-width:0}
+.form-section .wide{grid-column:1/-1}
+.form-section .hint{margin-top:-9px}
+#scheduleStatus{margin:0;padding:10px 12px;background:#f5f7fb;border-radius:8px}
+@media(max-width:600px){.form-section{grid-template-columns:1fr;padding:13px}.form-section .wide{grid-column:auto}}
