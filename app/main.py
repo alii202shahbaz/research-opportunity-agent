@@ -8,7 +8,7 @@ import time
 from collections import defaultdict, deque
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
 from fastapi.responses import FileResponse, RedirectResponse
@@ -100,6 +100,22 @@ async def security_headers(request: Request, call_next):
     if settings.is_production:
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
     return response
+
+
+@app.middleware("http")
+async def canonical_app_origin(request: Request, call_next):
+    # Keep the browser on one origin so host-only __Host-session cookies are
+    # never split across Vercel deployment aliases. OAuth callback URI and
+    # APP_BASE_URL are configured to this same canonical host.
+    if request.url.path == "/" and request.method in {"GET", "HEAD"}:
+        canonical_host = urlparse(settings.app_base_url).hostname
+        request_host = request.url.hostname
+        if canonical_host and request_host and request_host.lower() != canonical_host.lower():
+            destination = settings.app_base_url.rstrip("/") + "/"
+            if request.url.query:
+                destination += "?" + request.url.query
+            return RedirectResponse(url=destination, status_code=307)
+    return await call_next(request)
 
 
 @app.on_event("startup")
