@@ -3,6 +3,7 @@ from __future__ import annotations
 import html
 import json
 import logging
+import hashlib
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -190,3 +191,99 @@ def set_application_status(db: Session, user_id: str, opportunity: UserOpportuni
         raise LookupError("Opportunity not found")
     opportunity.application_status = new_status
     db.commit()
+
+def send_recovery_digest(
+    profile_snapshot: dict,
+    opportunities: list[dict],
+    *,
+    reason: str,
+    run_id: str,
+) -> str:
+    """Send an opt-in operational recovery email without a DB write.
+
+    The profile snapshot must have been loaded before the DB became
+    unavailable. This does not replace the normal deadline digest.
+    """
+    if not profile_snapshot.get("deadline_email_enabled"):
+        return "disabled"
+    recipients = profile_snapshot.get("deadline_emails") or []
+    if not recipients or not settings.resend_api_key or not settings.email_from:
+        return "not_configured"
+
+    clean_rows = []
+    for item in opportunities:
+        clean_rows.append({
+            "program_name": str(item.get("program_name", "")),
+            "institution": str(item.get("institution", "")),
+            "country": str(item.get("country", "")),
+            "funding_type": str(item.get("funding_type", "Not disclosed")),
+            "deadline": item.get("deadline"),
+            "application_url": str(item.get("application_url", "")),
+            "official_source_url": str(item.get("official_source_url", "")),
+        })
+    subject = f"Research agent recovery report — {len(clean_rows)} opportunities"
+    text_lines = [
+        "Your Research Opportunity Agent could not save this run to its database.",
+        "New findings below were sent directly to your connected Notion workspace where possible.",
+        "The agent will retry database persistence on a later run.",
+        "",
+    ]
+    cards = []
+    for item in clean_rows:
+        deadline = item["deadline"] or "Not reliably identified"
+        text_lines.extend([
+            f'{item["program_name"]} — {item["institution"]} ({item["country"]})',
+            f'Funding: {item["funding_type"]}; deadline: {deadline}',
+            f'Application: {item["application_url"]}',
+            f'Source: {item["official_source_url"]}',
+            "",
+        ])
+        name = html.escape(item["program_name"])
+        meta = html.escape(f'{item["institution"]} · {item["country"]} · {item["funding_type"]}')
+        app_url = html.escape(item["application_url"], quote=True)
+        source_url = html.escape(item["official_source_url"], quote=True)
+        cards.append(
+            '<tr><td style="padding:16px 0;border-bottom:1px solid #e5eaf1">'
+            f'<strong>{name}</strong><div style="color:#657286">{meta}</div>'
+            f'<a href="{app_url}">Application</a> · <a href="{source_url}">Official source</a>'
+            f'<div>Deadline: {html.escape(str(deadline))}</div></td></tr>'
+        )
+    body = (
+        '<div style="font-family:Arial,sans-serif;max-width:680px;margin:auto">'
+        '<h2>Research agent recovery report</h2>'
+        '<p>The database could not be updated during this run. This is a recovery copy, '
+        'not confirmation that records were saved in your dashboard.</p>'
+        '<p>Notion sync was attempted independently. The agent will retry persistence later.</p>'
+        + ('<table style="width:100%;border-collapse:collapse">' + ''.join(cards) + '</table>'
+           if cards else '<p>No new opportunity passed validation in this run.</p>')
+        + '</div>'
+    )
+    # Stable key makes retries of this same job idempotent at the provider.
+    idempotency_key = "recovery/" + hashlib.sha256(run_id.encode()).hexdigest()[:48]
+    payload = {
+        "from": settings.email_from,
+        "to": [recipients[0]],
+        "subject": subject,
+        "html": body,
+        "text": "\\n".join(text_lines),
+    }
+    if len(recipients) > 1:
+        payload["bcc"] = recipients[1:]
+    try:
+        with httpx.Client(timeout=httpx.Timeout(20.0, connect=8.0), follow_redirects=False) as client:
+            response = client.post(
+                RESEND_ENDPOINT,
+                headers={
+                    "Authorization": f"Bearer {settings.resend_api_key}",
+                    "Content-Type": "application/json",
+                    "Idempotency-Key": idempotency_key,
+                },
+                json=payload,
+            )
+        if response.status_code >= 400:
+            logger.warning("Recovery email failed (HTTP %s)", response.status_code)
+            return "failed"
+        return "sent"
+    except (httpx.HTTPError, ValueError) as exc:
+        logger.warning("Recovery email transport failed (%s)", type(exc).__name__)
+        return "failed"
