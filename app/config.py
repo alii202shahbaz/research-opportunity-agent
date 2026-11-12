@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     worker_poll_seconds: int = 30
     job_lease_minutes: int = 60
 
-    session_days: int = 14
+    session_idle_minutes: int = 10
     cookie_secure: bool = False
     allowed_hosts: str = "localhost,127.0.0.1,testserver"
     log_level: str = "INFO"
