@@ -132,14 +132,19 @@ class Settings(BaseSettings):
                 raise ValueError("NOTION_REDIRECT_URI must use HTTPS in production")
             base = urlparse(self.app_base_url)
             callback = urlparse(self.notion_redirect_uri)
+            callback_host = callback.hostname
             if (
                 base.scheme != "https" or callback.scheme != "https"
-                or base.hostname != callback.hostname or base.port != callback.port
+                or not callback_host or callback_host not in self.host_list
+                or callback.port not in (None, 443)
                 or base.path not in {"", "/"}
                 or callback.path != "/oauth/notion/callback"
                 or callback.query or callback.fragment
             ):
-                raise ValueError("NOTION_REDIRECT_URI must be the HTTPS app origin plus /oauth/notion/callback")
+                raise ValueError(
+                    "NOTION_REDIRECT_URI must be HTTPS, use an allowed production hostname, "
+                    "and end in /oauth/notion/callback"
+                )
             if "*" in self.host_list:
                 raise ValueError("Wildcard ALLOWED_HOSTS is not allowed in production")
         return self
