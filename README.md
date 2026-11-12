@@ -143,3 +143,11 @@ python -m pytest -q
 ```
 
 GitHub Actions runs the test suite and a `pip-audit` dependency vulnerability check on pushes and pull requests to `main`. Dependabot checks Python and GitHub Actions dependencies weekly.
+
+## Deadline reminders and application tracking
+
+Each account can opt in to deadline digests and provide up to 10 email addresses. The worker sends one combined message per user's local calendar day, at the saved daily update time, when at least one Pending opportunity has a confirmed deadline on the following day. The primary recipient is in To and additional recipients are BCC'd. A per-user/per-local-day database record plus a Resend idempotency key protects against duplicate delivery attempts. No email is sent when the preference is disabled, the recipient list is empty, or no matching deadline exists.
+
+To enable delivery, set `RESEND_API_KEY` and `EMAIL_FROM` for both the web and worker services. The sender must be verified with Resend. The app does not send reminders until each user opts in and saves their recipient addresses.
+
+Application status starts as **Pending**. Users can change it to **Waiting**, **Done**, **Accepted**, or **Rejected** from the dashboard. A still-Pending record whose deadline has passed is automatically moved to **Deadline Passed**. The system does not infer that an application was submitted or accepted, and it does not overwrite a user-confirmed Waiting/Done/Accepted/Rejected status.
