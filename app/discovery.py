@@ -46,26 +46,47 @@ class DiscoveredOpportunity(BaseModel):
     relevance_score: float = Field(default=0.0, ge=0, le=1)
 
 
-class BraveSearch:
-    ENDPOINT = "https://api.search.brave.com/res/v1/web/search"
+class TavilySearch:
+    ENDPOINT = "https://api.tavily.com/search"
 
     def __init__(self, api_key: str):
         self.api_key = api_key
-        self.client = httpx.Client(timeout=httpx.Timeout(25.0, connect=10.0), follow_redirects=False)
+        self.client = httpx.Client(timeout=httpx.Timeout(35.0, connect=10.0), follow_redirects=False)
 
     def search(self, query: str, count: int = 8) -> list[dict]:
         response = None
         for attempt in range(4):
-            response = self.client.get(
+            response = self.client.post(
                 self.ENDPOINT,
-                params={"q": query, "count": count, "search_lang": "en", "safesearch": "moderate"},
-                headers={"X-Subscription-Token": self.api_key, "Accept": "application/json"},
+                json={
+                    "query": query,
+                    "max_results": max(1, min(20, count)),
+                    "search_depth": "basic",
+                    "topic": "general",
+                    "include_answer": False,
+                    "include_raw_content": False,
+                },
+                headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                },
             )
-            if response.status_code not in {429, 500, 502, 503, 504} or attempt == 3:
+            if response.status_code not in {429, 500, 502, 503, 504, 529} or attempt == 3:
                 break
             time.sleep(min(8.0, 0.75 * (2 ** attempt)))
         response.raise_for_status()
-        return response.json().get("web", {}).get("results", [])
+        results = response.json().get("results", [])
+        # The discovery pipeline consumes a search-engine neutral shape.
+        return [
+            {
+                "url": item.get("url", ""),
+                "title": item.get("title", ""),
+                "description": item.get("content", ""),
+            }
+            for item in results
+            if item.get("url")
+        ]
 
     def close(self) -> None:
         self.client.close()
@@ -540,10 +561,10 @@ def extract_candidate(result: dict, profile: UserProfile) -> DiscoveredOpportuni
 
 
 def discover_for_profile(profile: UserProfile) -> list[DiscoveredOpportunity]:
-    if not settings.brave_search_api_key:
-        logger.warning("Discovery skipped: BRAVE_SEARCH_API_KEY is not configured")
+    if not settings.tavily_api_key:
+        logger.warning("Discovery skipped: TAVILY_API_KEY is not configured")
         return []
-    searcher = BraveSearch(settings.brave_search_api_key)
+    searcher = TavilySearch(settings.tavily_api_key)
     seen_urls: set[str] = set()
     candidates: list[DiscoveredOpportunity] = []
     queries = build_queries(profile)
