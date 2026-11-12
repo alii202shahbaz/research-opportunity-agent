@@ -258,8 +258,15 @@ def send_recovery_digest(
            if cards else '<p>No new opportunity passed validation in this run.</p>')
         + '</div>'
     )
-    # Stable key makes retries of this same job idempotent at the provider.
-    idempotency_key = "recovery/" + hashlib.sha256(run_id.encode()).hexdigest()[:48]
+    # Stable key deduplicates the same user's same set of findings on the
+    # same local day, including a worker retry after its lease expires.
+    zone = ZoneInfo(profile_snapshot.get("timezone_name") or "UTC")
+    local_date = datetime.now(timezone.utc).astimezone(zone).date().isoformat()
+    source_fingerprint = hashlib.sha256(
+        "\\n".join(sorted(item["official_source_url"] for item in clean_rows)).encode("utf-8")
+    ).hexdigest()[:32]
+    user_key = str(profile_snapshot.get("user_id", "unknown"))
+    idempotency_key = f"recovery/{user_key}/{local_date}/{source_fingerprint}"
     payload = {
         "from": settings.email_from,
         "to": [recipients[0]],
