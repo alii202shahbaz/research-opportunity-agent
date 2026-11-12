@@ -82,6 +82,7 @@ def init_db() -> None:
             "current_semester": "INTEGER",
             "deadline_email_enabled": "BOOLEAN NOT NULL DEFAULT FALSE",
             "deadline_emails_json": "TEXT NOT NULL DEFAULT '[]'",
+            "manual_cooldown_until": "TIMESTAMP WITH TIME ZONE" if connection.dialect.name == "postgresql" else "DATETIME",
         }
         for name, ddl in profile_additions.items():
             if name not in profile_columns:
