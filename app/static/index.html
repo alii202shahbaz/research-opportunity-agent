@@ -15,7 +15,11 @@
   </header>
 
   <main class="container">
-    <section id="authView" class="auth-layout">
+    <section id="loadingView" class="loading-view" aria-live="polite">
+      <span class="loading-indicator" aria-hidden="true"></span>
+      <p>Checking your session and loading your workspace…</p>
+    </section>
+    <section id="authView" class="auth-layout hidden">
       <div class="hero-copy">
         <p class="eyebrow">RESEARCH DISCOVERY · AUTOMATION</p>
         <h1>Find the research opportunities you should not miss.</h1>
@@ -93,7 +97,7 @@
               <div class="inline-controls"><input id="pageSearch" placeholder="Search pages shared with the integration"><button id="searchPagesBtn" class="button button-secondary">Search</button></div>
               <div id="pageResults" class="page-results"></div>
               <button id="createDatabaseBtn" class="button button-primary full" disabled>Create research database here</button>
-              <p class="hint">Only pages explicitly shared during Notion authorization appear here. The agent creates a new database; it does not modify existing pages.</p>
+              <p class="hint">Only pages connected to this integration appear here. To add another page later, open that page in Notion, choose <strong>••• → Connections</strong>, and connect <strong>Research Opportunity Agent</strong>. Then search again here. The agent creates a new database; it does not modify existing pages.</p>
             </div>
             <button id="disconnectNotionBtn" class="button button-ghost full danger-text">Disconnect Notion</button>
           </div>
