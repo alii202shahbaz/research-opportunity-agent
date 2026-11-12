@@ -14,7 +14,7 @@ A multi-user web application that collects an individual's academic profile, dis
 - Notion OAuth: users authorize a public integration, select an accessible parent page, and create a dedicated structured database under that page. No user is asked to paste an API token.
 - AES-256-GCM encryption for Notion access/refresh tokens at rest; HMAC-peppered hashes for app session tokens and OAuth state.
 - HTTP-only session cookie, CSRF protection, strict security headers, host validation, account deletion, and Notion disconnect/revocation.
-- A database-backed scheduler processes each user's local-time schedule. The free deployment runs it every six hours through GitHub Actions.
+- A database-backed scheduler processes each user's local-time schedule. The free deployment checks due work every six hours through GitHub Actions; each user's discovery itself runs once daily according to their profile.
 - The web app is deployed as a Vercel Python Function; Supabase Free provides PostgreSQL.
 
 ## Architecture
@@ -93,7 +93,7 @@ This is a $0 hobby/portfolio deployment path. Vercel Hobby is intended for perso
    - `NOTION_REDIRECT_URI=https://YOUR-PROJECT.vercel.app/oauth/notion/callback`
    - `ALLOWED_HOSTS=YOUR-PROJECT.vercel.app`
    - `COOKIE_SECURE=true`
-   - `DATABASE_URL` = Supabase Session pooler connection string
+   - `DATABASE_URL` = Supabase Transaction pooler connection string
    - `APP_SECRET_KEY` and `TOKEN_ENCRYPTION_KEY` = two independent random secrets (generate them locally with Python; do not reuse one for both)
    - `NOTION_OAUTH_CLIENT_ID`, `NOTION_OAUTH_CLIENT_SECRET`, and `BRAVE_SEARCH_API_KEY`
    - Optional email pair: `RESEND_API_KEY` and `EMAIL_FROM`. Leave both unset to disable email delivery.
