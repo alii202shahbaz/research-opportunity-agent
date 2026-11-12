@@ -83,9 +83,9 @@ SQLite is only for local single-user development. Use PostgreSQL for deployment 
 
 ## Free deployment (Vercel + Supabase + GitHub Actions)
 
-This is a $0 hobby/portfolio deployment path. Vercel Hobby is intended for personal, non-commercial projects and has usage limits; check its current terms before inviting users or using it commercially. Supabase Free provides 500 MB of Postgres storage, may pause a project after a week of low activity, and does not include automatic backups. GitHub Free includes 2,000 Actions minutes/month for private repositories. The app is serverless on Vercel, so it has cold starts and no always-running worker.
+This is a $0 hobby/portfolio deployment path. Vercel Hobby is intended for personal, non-commercial projects and has usage limits; check its current terms before inviting users or using it commercially. Supabase Free provides 500 MB of Postgres storage, may pause a project after a week of low activity, and does not include automatic backups. Use its Transaction pooler for this serverless app. GitHub Free currently includes $12/month in compute usage for standard runners on private repositories; additional usage is blocked if no payment method is on file, but can be billed if one is added. The app is serverless on Vercel, so it has cold starts and no always-running worker.
 
-1. Create a **Supabase Free** project, preferably in Singapore. In Project Settings → Database, copy the **Session pooler** connection string and keep the password private. This is `DATABASE_URL`.
+1. Create a **Supabase Free** project, preferably in Singapore. In Project Settings → Database, copy the **Transaction pooler** connection string (port `6543`) and keep the password private. This is `DATABASE_URL`. The app is configured for Supabase transaction pooling.
 2. In Vercel, import the private GitHub repository `alii202shahbaz/research-opportunity-agent`. Vercel should detect the Python/FastAPI entrypoint in root `index.py`; `vercel.json` includes the static dashboard files and sets the function region to Singapore.
 3. Add these Production environment variables in Vercel:
    - `APP_ENV=production`
