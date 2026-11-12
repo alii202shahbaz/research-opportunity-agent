@@ -252,8 +252,8 @@ def _notion_schema() -> dict:
         "Program ID": {"rich_text": {}},
         "Last Verified": {"date": {}},
         "Application Status": {"select": {"options": [
-            {"name": "Not Applied"}, {"name": "Interested"}, {"name": "Preparing"},
-            {"name": "Applied"}, {"name": "Rejected"}, {"name": "Accepted"},
+            {"name": "Pending"}, {"name": "Waiting"}, {"name": "Done"},
+            {"name": "Deadline Passed"}, {"name": "Accepted"}, {"name": "Rejected"},
         ]}},
     }
 
@@ -341,6 +341,7 @@ def _property_payload(opp) -> dict:
         "Intake Confirmed": {"checkbox": bool(opp.intake_confirmed)},
         "Opportunity Status": {"select": {"name": status}},
         "Program ID": {"rich_text": _rt(opp.id)},
+        "Application Status": {"select": {"name": opp.application_status if opp.application_status in {"Pending", "Waiting", "Done", "Deadline Passed", "Accepted", "Rejected"} else "Pending"}},
         "Last Verified": {"date": {"start": opp.last_verified_at.date().isoformat()}},
     }
     if opp.deadline:
