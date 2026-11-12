@@ -101,5 +101,10 @@
       "path": "/api/cron/23",
       "schedule": "0 23 * * *"
     }
-  ]
+  ],
+  "functions": {
+    "app/main.py": {
+      "maxDuration": 300
+    }
+  }
 }
