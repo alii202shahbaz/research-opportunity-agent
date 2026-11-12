@@ -150,6 +150,15 @@ python -m pytest -q
 
 GitHub Actions runs the test suite and a `pip-audit` dependency vulnerability check on pushes and pull requests to `main`. Dependabot checks Python and GitHub Actions dependencies weekly.
 
+## Recovery, Notion mirroring, and data retention
+
+- The worker checks the database every six hours, while each user's discovery is due once per day according to their saved schedule. These requests also help keep a Supabase Free project active, but Supabase says activity thresholds are not guaranteed; a Free project can still be paused after a low-activity week. A few real database requests per day are usually enough, not a promise. See the [Supabase inactivity guidance](https://supabase.com/docs/guides/platform/free-project-pausing).
+- When a profile and Notion credentials have already been loaded successfully, new discoveries are mirrored to Notion before the app attempts to persist them in PostgreSQL. If that PostgreSQL write fails, the worker attempts an opt-in recovery email containing the current run's findings, then leaves the job lease to expire so a later worker can retry.
+- Recovery email uses the user's saved email opt-in and recipient list plus the configured Resend sender. It is not sent when email reminders are disabled or the provider is not configured.
+- This is a best-effort fallback for a database write failure during an active run, **not** full protection against a total database outage. If PostgreSQL is unavailable before the worker can load the user profile, Notion token, or recipients, the worker cannot identify which user to process or authenticate to Notion. A separate durable configuration/credential store and an independent backup/restore process would be required for that stronger guarantee.
+- Unreviewed opportunities with a known deadline are archived 30 days after that deadline: their Notion page is moved to Trash first, then the local opportunity row is deleted. If Notion is unavailable, deletion is deferred. Opportunities without a reliable deadline and user-managed application statuses (Waiting, Done, Accepted, Rejected) are preserved. The automatically generated Deadline Passed status is eligible for cleanup after the 30-day grace period.
+- This retention rule is deliberately based on the deadline, not the discovery date, so an opportunity with a future deadline is not deleted just because it has been in the database for a month.
+
 ## Deadline reminders and application tracking
 
 Each account can opt in to deadline digests and provide up to 10 email addresses. The scheduled runner sends one combined message per user's local calendar day, on the first scheduled run after the saved daily update time (within about six hours, subject to GitHub scheduling delays), when at least one Pending opportunity has a confirmed deadline on the following day. The primary recipient is in To and additional recipients are BCC'd. A per-user/per-local-day database record plus a Resend idempotency key protects against duplicate delivery attempts. No email is sent when the preference is disabled, the recipient list is empty, or no matching deadline exists.
