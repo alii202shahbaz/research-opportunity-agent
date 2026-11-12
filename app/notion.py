@@ -292,7 +292,7 @@ def create_opportunity_database(db: Session, user_id: str, parent_page_id: str) 
     profile = db.get(UserProfile, user_id)
     intake_year = profile.intake_year if profile else 2027
     intake_season = profile.intake_season if profile else "Summer"
-    database_title = f"{intake_year} {intake_season} Research Opportunities"
+    database_title = f"{intake_year} {intake_season} OppFindAgent Opportunities"
     data = api_for_user(
         db,
         user_id,
@@ -301,7 +301,7 @@ def create_opportunity_database(db: Session, user_id: str, parent_page_id: str) 
         json={
             "parent": {"type": "page_id", "page_id": parent_page_id},
             "title": [{"type": "text", "text": {"content": database_title}}],
-            "description": [{"type": "text", "text": {"content": "Automatically discovered research internships, fellowships and funded opportunities matched to your academic profile."}}],
+            "description": [{"type": "text", "text": {"content": "OppFindAgent automatically discovers research internships, fellowships and funded opportunities matched to your academic profile."}}],
             "initial_data_source": {"properties": _notion_schema()},
         },
     )
