@@ -118,7 +118,12 @@ async function loadDashboard() {
   $("userEmail").textContent = me.email;
   fillProfile(me.profile);
   renderNotion(me.notion);
-  await loadOpportunities();
+  showDashboard();
+  try {
+    await loadOpportunities();
+  } catch (err) {
+    toast("Your workspace loaded, but opportunities could not be refreshed: " + err.message, true);
+  }
 }
 function renderOpportunities(items) {
   const target = $("opportunitiesList");
@@ -259,8 +264,9 @@ $("deleteAccountBtn").addEventListener("click", async () => {
 (async function boot() {
   renderHourOptions();
   $("timezone").value = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
-  try { await initCsrf(); await loadDashboard(); showDashboard(); }
+  try { await initCsrf(); await loadDashboard(); }
   catch (_) { showAuth(); }
+  finally { $("loadingView").classList.add("hidden"); }
   const params = new URLSearchParams(window.location.search);
   if (params.get("notion") === "connected") { toast("Notion connected. Choose a page to create your database."); history.replaceState({}, "", "/"); try { await refreshMe(); } catch (_) {} }
   if (params.get("notion_error")) { toast("Notion connection did not complete. You can try again.", true); history.replaceState({}, "", "/"); }
