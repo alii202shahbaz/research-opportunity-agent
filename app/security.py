@@ -92,7 +92,7 @@ def set_session_cookies(response: Response, session_token: str, csrf_token: str)
     response.set_cookie(
         SESSION_COOKIE,
         session_token,
-        max_age=settings.session_days * 24 * 3600,
+        max_age=settings.session_idle_minutes * 60,
         secure=settings.cookie_secure,
         httponly=True,
         samesite="lax",
@@ -101,7 +101,7 @@ def set_session_cookies(response: Response, session_token: str, csrf_token: str)
     response.set_cookie(
         CSRF_COOKIE,
         csrf_token,
-        max_age=settings.session_days * 24 * 3600,
+        max_age=settings.session_idle_minutes * 60,
         secure=settings.cookie_secure,
         httponly=False,
         samesite="strict",
@@ -122,7 +122,7 @@ def issue_session(db: Session, user: User, response: Response) -> None:
             user_id=user.id,
             token_hash=sha256_hex(session_token),
             csrf_hash=sha256_hex(csrf_token),
-            expires_at=datetime.now(timezone.utc) + timedelta(days=settings.session_days),
+            expires_at=datetime.now(timezone.utc) + timedelta(minutes=settings.session_idle_minutes),
         )
     )
     db.commit()
@@ -139,6 +139,7 @@ def get_db():
 
 def get_current_context(
     request: Request,
+    response: Response,
     session_token: Optional[str] = Cookie(default=None, alias=SESSION_COOKIE),
     db: Session = Depends(get_db),
 ) -> tuple[User, UserSession]:
@@ -152,6 +153,24 @@ def get_current_context(
     user = db.get(User, session.user_id)
     if not user or not user.is_active:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Account unavailable")
+
+    # Ten-minute inactivity timeout. Authenticated API activity refreshes the
+    # browser cookie and extends the database expiry before it gets too close.
+    now = datetime.now(timezone.utc)
+    session.expires_at = now + timedelta(minutes=settings.session_idle_minutes)
+    db.commit()
+    response.set_cookie(
+        SESSION_COOKIE, session_token,
+        max_age=settings.session_idle_minutes * 60,
+        secure=settings.cookie_secure, httponly=True, samesite="lax", path="/",
+    )
+    csrf_value = request.cookies.get(CSRF_COOKIE)
+    if csrf_value:
+        response.set_cookie(
+            CSRF_COOKIE, csrf_value,
+            max_age=settings.session_idle_minutes * 60,
+            secure=settings.cookie_secure, httponly=False, samesite="strict", path="/",
+        )
     return user, session
 
 
