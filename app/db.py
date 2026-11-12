@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from sqlalchemy import create_engine, event, inspect, text
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
+from sqlalchemy.pool import NullPool
 
 from app.config import get_settings
 
@@ -25,13 +26,22 @@ class Base(DeclarativeBase):
     pass
 
 
-engine = create_engine(
-    _database_url(settings.database_url),
-    pool_pre_ping=True,
-    pool_recycle=300,
-    connect_args={"check_same_thread": False, "timeout": 15} if settings.database_url.startswith("sqlite") else {},
-)
-if settings.database_url.startswith("sqlite"):
+_is_sqlite = settings.database_url.startswith("sqlite")
+_engine_options = {
+    "pool_pre_ping": True,
+    "pool_recycle": 300,
+}
+if _is_sqlite:
+    _engine_options["connect_args"] = {"check_same_thread": False, "timeout": 15}
+else:
+    # Vercel Functions and the GitHub Actions worker connect through Supabase's
+    # transaction pooler. Avoid a process-local connection pool and disable
+    # psycopg prepared statements, which the shared transaction pooler lacks.
+    _engine_options["poolclass"] = NullPool
+    _engine_options["connect_args"] = {"prepare_threshold": None}
+
+engine = create_engine(_database_url(settings.database_url), **_engine_options)
+if _is_sqlite:
     @event.listens_for(engine, "connect")
     def _sqlite_connection_pragmas(dbapi_connection, _connection_record):
         cursor = dbapi_connection.cursor()
