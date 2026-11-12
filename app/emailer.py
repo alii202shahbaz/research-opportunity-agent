@@ -31,7 +31,7 @@ def email_delivery_status() -> dict[str, str | bool]:
     if settings.email_configured:
         message = f"Ready to send through {provider_label}."
     elif sender and provider == "smtp":
-        message = "Add the Gmail App Password to the deployment's GMAIL_APP_PASSWORD secret to enable delivery."
+        message = "Email delivery is unavailable because the sender credentials are incomplete."
     elif sender and provider == "resend":
         message = "Add the Resend API key to enable delivery."
     else:
