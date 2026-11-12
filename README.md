@@ -83,9 +83,9 @@ SQLite is only for local single-user development. Use PostgreSQL for deployment 
 
 ## Free deployment (Vercel + Supabase + GitHub Actions)
 
-This is a $0 hobby/portfolio deployment path. Vercel Hobby is intended for personal, non-commercial projects and has usage limits; check its current terms before inviting users or using it commercially. Supabase Free provides 500 MB of Postgres storage, may pause a project after a week of low activity, and does not include automatic backups. Use its Transaction pooler for this serverless app. GitHub Free currently includes $12/month in compute usage for standard runners on private repositories; additional usage is blocked if no payment method is on file, but can be billed if one is added. The app is serverless on Vercel, so it has cold starts and no always-running worker.
+This is a $0 hobby/portfolio deployment path. Vercel Hobby is intended for personal, non-commercial projects and has usage limits; check its current terms before inviting users or using it commercially. Supabase Free provides 500 MB of Postgres storage, may pause a project after a week of low activity, and does not include automatic backups. Use its Transaction pooler (port 6543) for this serverless app when available; the Session pooler (port 5432) is an acceptable fallback. GitHub Free currently includes $12/month in compute usage for standard runners on private repositories; additional usage is blocked if no payment method is on file, but can be billed if one is added. The app is serverless on Vercel, so it has cold starts and no always-running worker.
 
-1. Create a **Supabase Free** project, preferably in Singapore. In Project Settings → Database, copy the **Transaction pooler** connection string (port `6543`) and keep the password private. This is `DATABASE_URL`. The app is configured for Supabase transaction pooling.
+1. Create a **Supabase Free** project, preferably in Singapore. In Project Settings → Database, copy the **Transaction pooler** URI (port `6543`) when available. If your dashboard only shows **Session pooler**, copy that URI instead (port `5432`). Both use the shared IPv4 pooler and are supported by this app. Keep the password private. This is `DATABASE_URL`.
 2. In Vercel, import the private GitHub repository `alii202shahbaz/research-opportunity-agent`. Vercel should detect the Python/FastAPI entrypoint in root `index.py`; `vercel.json` includes the static dashboard files and sets the function region to Singapore.
 3. Add these Production environment variables in Vercel:
    - `APP_ENV=production`
@@ -93,7 +93,7 @@ This is a $0 hobby/portfolio deployment path. Vercel Hobby is intended for perso
    - `NOTION_REDIRECT_URI=https://YOUR-PROJECT.vercel.app/oauth/notion/callback`
    - `ALLOWED_HOSTS=YOUR-PROJECT.vercel.app`
    - `COOKIE_SECURE=true`
-   - `DATABASE_URL` = Supabase Transaction pooler connection string
+   - `DATABASE_URL` = Supabase Transaction pooler URI (or Session pooler URI if Transaction is not shown)
    - `APP_SECRET_KEY` and `TOKEN_ENCRYPTION_KEY` = two independent random secrets (generate them locally with Python; do not reuse one for both)
    - `NOTION_OAUTH_CLIENT_ID`, `NOTION_OAUTH_CLIENT_SECRET`, and `BRAVE_SEARCH_API_KEY`
    - Optional email pair: `RESEND_API_KEY` and `EMAIL_FROM`. Leave both unset to disable email delivery.
