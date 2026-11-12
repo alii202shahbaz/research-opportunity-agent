@@ -99,11 +99,11 @@ def send_test_email(recipient: str) -> str:
     payload = {
         "from": settings.email_from,
         "to": [recipient],
-        "subject": "Research Opportunity Agent — test email",
-        "text": "Your Research Opportunity Agent email delivery is working.",
+        "subject": "OppFindAgent — test email",
+        "text": "Your OppFindAgent email delivery is working.",
         "html": (
             '<div style="font-family:Arial,sans-serif;color:#172235">'
-            '<h2>Research Opportunity Agent</h2>'
+            '<h2>OppFindAgent</h2>'
             '<p>Your email sender is configured and working.</p>'
             '</div>'
         ),
@@ -130,7 +130,7 @@ def tomorrow_deadlines(db: Session, user_id: str, tomorrow: date) -> list[UserOp
 
 
 def _render_digest(rows: list[UserOpportunity], deadline_date: date) -> tuple[str, str, str]:
-    subject = f"Research deadlines tomorrow — {len(rows)} {'opportunity' if len(rows) == 1 else 'opportunities'}"
+    subject = f"OppFindAgent — research deadlines tomorrow — {len(rows)} {'opportunity' if len(rows) == 1 else 'opportunities'}"
     text_lines = [f"These research opportunity deadlines fall on {deadline_date.isoformat()}:", ""]
     cards = []
     for row in rows:
@@ -161,7 +161,7 @@ def _render_digest(rows: list[UserOpportunity], deadline_date: date) -> tuple[st
         f'<strong>{deadline_date.isoformat()}</strong>.</p>'
         '<table style="width:100%;border-collapse:collapse">' + "".join(cards) + '</table>'
         '<p style="font-size:12px;color:#8792a3;margin-top:24px">This is your single daily research deadline digest. '
-        'Update each application status in your Research Agent dashboard. Completed items are excluded.</p>'
+        'Update each application status in your OppFindAgent dashboard. Completed items are excluded.</p>'
         '</div>'
     )
     return subject, html_body, "\n".join(text_lines)
@@ -307,9 +307,9 @@ def send_recovery_digest(
             "application_url": str(item.get("application_url", "")),
             "official_source_url": str(item.get("official_source_url", "")),
         })
-    subject = f"Research agent recovery report — {len(clean_rows)} opportunities"
+    subject = f"OppFindAgent recovery report — {len(clean_rows)} opportunities"
     text_lines = [
-        "Your Research Opportunity Agent could not save this run to its database.",
+        "Your OppFindAgent could not save this run to its database.",
         "New findings below were sent directly to your connected Notion workspace where possible.",
         "The agent will retry database persistence on a later run.",
         "",
@@ -336,7 +336,7 @@ def send_recovery_digest(
         )
     body = (
         '<div style="font-family:Arial,sans-serif;max-width:680px;margin:auto">'
-        '<h2>Research agent recovery report</h2>'
+        '<h2>OppFindAgent recovery report</h2>'
         '<p>The database could not be updated during this run. This is a recovery copy, '
         'not confirmation that records were saved in your dashboard.</p>'
         '<p>Notion sync was attempted independently. The agent will retry persistence later.</p>'
