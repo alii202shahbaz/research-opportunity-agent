@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.db import SessionLocal
-from app.discovery import discover_for_profile, persist_candidates
+from app.discovery import canonicalize_url, discover_for_profile, persist_candidates
 from app.emailer import refresh_application_statuses, send_deadline_digest, send_recovery_digest
 from app.models import NotionConnection, UserOpportunity, UserProfile
 from app.notion import (NotionAPIError, prepare_notion_sync, sync_discovered_candidate, trash_notion_page, upsert_opportunity_page)
@@ -70,7 +70,10 @@ def archive_stale_opportunities(db: Session, user_id: str, today: date, notion_c
     ).all()
     archived = 0
     for row in stale:
-        if row.notion_page_id and notion_context:
+        if row.notion_page_id:
+            if not notion_context:
+                # Never delete the local mirror if its Notion copy cannot be archived.
+                continue
             try:
                 trash_notion_page(notion_context, row.notion_page_id)
             except NotionAPIError as exc:
@@ -115,7 +118,7 @@ def process_user(user_id: str) -> None:
                 try:
                     page_id = sync_discovered_candidate(notion_context, candidate)
                     if page_id:
-                        direct_page_ids[str(candidate.official_source_url)] = page_id
+                        direct_page_ids[canonicalize_url(str(candidate.official_source_url)) or str(candidate.official_source_url)] = page_id
                     notion_direct_synced += 1
                     time.sleep(0.35)
                 except NotionAPIError as exc:
