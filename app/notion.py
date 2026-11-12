@@ -4,6 +4,10 @@ import base64
 import secrets
 import time
 import logging
+import json
+import uuid
+from dataclasses import dataclass
+from types import SimpleNamespace
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode
 
@@ -382,6 +386,123 @@ def upsert_opportunity_page(db: Session, user_id: str, opp) -> str:
     db.commit()
     return page_id
 
+
+
+@dataclass(frozen=True)
+class NotionSyncContext:
+    """A short-lived token snapshot used to sync while DB writes are unavailable."""
+
+    user_id: str
+    data_source_id: str
+    access_token: str
+
+
+def prepare_notion_sync(db: Session, user_id: str) -> NotionSyncContext | None:
+    connection = db.get(NotionConnection, user_id)
+    if not connection or not connection.data_source_id:
+        return None
+    # Resolve/refresh once while the database is available. Subsequent page
+    # requests use this in-memory token and do not need another DB lookup.
+    token = _refresh_if_needed(db, connection)
+    return NotionSyncContext(
+        user_id=user_id,
+        data_source_id=connection.data_source_id,
+        access_token=token,
+    )
+
+
+def sync_discovered_candidate(context: NotionSyncContext, candidate) -> str | None:
+    """Upsert a fresh discovery directly to Notion before attempting DB writes.
+
+    The official source URL is used as the deduplication key, so a DB write
+    outage does not cause duplicate Notion rows on the next run.
+    """
+    source_url = str(candidate.official_source_url)
+    queried = _request(
+        "POST",
+        f"/data_sources/{context.data_source_id}/query",
+        token=context.access_token,
+        json={
+            "filter": {
+                "property": "Official Source URL",
+                "url": {"equals": source_url},
+            },
+            "page_size": 1,
+        },
+    )
+    existing = (queried.get("results") or [None])[0]
+    if existing is None and candidate.opportunity_status == "Expired":
+        return None
+
+    existing_properties = (existing or {}).get("properties", {})
+    existing_status = (
+        (existing_properties.get("Application Status") or {})
+        .get("select", {}).get("name", "Pending")
+    )
+    stable_program_id = str(uuid.uuid5(
+        uuid.NAMESPACE_URL, f"{context.user_id}:{source_url}"
+    ))
+    payload_object = SimpleNamespace(
+        id=stable_program_id,
+        program_name=candidate.program_name,
+        institution=candidate.institution,
+        country=candidate.country,
+        domains_json=json.dumps(candidate.domains),
+        funding_type=candidate.funding_type,
+        funding_details=candidate.funding_details,
+        stipend=candidate.stipend,
+        tuition_waiver=candidate.tuition_waiver,
+        travel_grant=candidate.travel_grant,
+        housing=candidate.housing,
+        deadline=candidate.deadline,
+        deadline_note=candidate.deadline_note,
+        application_url=str(candidate.application_url),
+        official_source_url=source_url,
+        eligibility=candidate.eligibility,
+        verification_status=candidate.verification_status,
+        relevance_score=candidate.relevance_score,
+        intake_year=candidate.intake_year,
+        intake_confirmed=candidate.intake_confirmed,
+        opportunity_status=candidate.opportunity_status,
+        application_status=existing_status,
+        last_verified_at=datetime.now(timezone.utc),
+    )
+    properties = _property_payload(payload_object)
+    if existing:
+        # Application status is user-maintained. Never overwrite it during a
+        # recovery sync, and keep the existing Program ID link intact.
+        properties.pop("Application Status", None)
+        properties.pop("Program ID", None)
+        page_id = existing.get("id")
+        if not page_id:
+            raise NotionAPIError("Notion returned a row without a page ID")
+        _request(
+            "PATCH", f"/pages/{page_id}", token=context.access_token,
+            json={"properties": properties},
+        )
+        return page_id
+
+    created = _request(
+        "POST",
+        "/pages",
+        token=context.access_token,
+        json={
+            "parent": {"type": "data_source_id", "data_source_id": context.data_source_id},
+            "properties": properties,
+        },
+    )
+    page_id = created.get("id")
+    if not page_id:
+        raise NotionAPIError("Notion did not return the new page ID")
+    return page_id
+
+
+def trash_notion_page(context: NotionSyncContext, page_id: str) -> None:
+    """Move a retained Notion page to Trash using the current API field."""
+    _request(
+        "PATCH", f"/pages/{page_id}", token=context.access_token,
+        json={"in_trash": True},
+    )
 
 def revoke_and_disconnect(db: Session, user_id: str) -> None:
     connection = db.get(NotionConnection, user_id)
