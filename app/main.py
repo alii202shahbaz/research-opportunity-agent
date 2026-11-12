@@ -13,12 +13,14 @@ from urllib.parse import quote
 from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.db import SessionLocal, init_db
+from app.emailer import set_application_status
 from app.models import NotionConnection, OAuthState, User, UserOpportunity, UserProfile, UserSession
 from app.notion import (
     NotionAPIError,
@@ -61,6 +63,7 @@ app = FastAPI(
     openapi_url=None if settings.is_production else "/openapi.json",
 )
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.host_list)
+app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 
 # Small per-process guardrail. For a horizontally scaled public SaaS, move this
 # limiter to Redis or enforce equivalent limits at the edge/WAF.
@@ -143,6 +146,8 @@ def _profile_payload(profile: UserProfile | None) -> dict | None:
         "timezone_name": profile.timezone_name,
         "update_hour": profile.update_hour,
         "automation_enabled": profile.automation_enabled,
+        "deadline_email_enabled": profile.deadline_email_enabled,
+        "deadline_emails": json.loads(profile.deadline_emails_json or "[]"),
         "last_run_at": profile.last_run_at.isoformat() if profile.last_run_at else None,
         "last_run_status": profile.last_run_status,
         "last_run_summary": profile.last_run_summary,
@@ -242,11 +247,12 @@ def save_profile(
         profile = UserProfile(user_id=user.id)
         db.add(profile)
     for field in ["degree", "university", "cgpa", "cgpa_scale", "current_year", "current_semester", "graduation_year", "citizenship",
-                  "funding_preference", "intake_year", "intake_season", "timezone_name", "update_hour", "automation_enabled"]:
+                  "funding_preference", "intake_year", "intake_season", "timezone_name", "update_hour", "automation_enabled", "deadline_email_enabled"]:
         setattr(profile, field, getattr(payload, field))
+    profile.deadline_emails_json = json.dumps(payload.deadline_emails)
     profile.interests_json = json.dumps(payload.interests)
     profile.preferred_countries_json = json.dumps(payload.preferred_countries)
-    profile.next_run_at = next_scheduled_run(profile) if payload.automation_enabled else None
+    profile.next_run_at = next_scheduled_run(profile) if (payload.automation_enabled or payload.deadline_email_enabled) else None
     profile.lease_until = None
     db.commit()
     return {"ok": True, "profile": _profile_payload(profile)}
@@ -364,11 +370,43 @@ def opportunities(context=Depends(get_current_context)):
                 official_source_url=row.official_source_url, eligibility=row.eligibility,
                 verification_status=row.verification_status, relevance_score=row.relevance_score,
                 intake_year=row.intake_year, intake_confirmed=row.intake_confirmed, opportunity_status=row.opportunity_status,
+                application_status=row.application_status,
                 first_seen_at=row.first_seen_at.isoformat(), last_verified_at=row.last_verified_at.isoformat(),
             ) for row in rows
         ]
     finally:
         db.close()
+
+
+@app.patch("/api/opportunities/{opportunity_id}/application-status")
+def update_application_status(
+    opportunity_id: str,
+    payload: dict,
+    context=Depends(require_auth_csrf),
+    db: Session = Depends(get_db),
+):
+    user, _session = context
+    if set(payload) != {"status"} or not isinstance(payload.get("status"), str):
+        raise HTTPException(status_code=422, detail="Provide one application status")
+    row = db.scalar(select(UserOpportunity).where(
+        UserOpportunity.id == opportunity_id,
+        UserOpportunity.user_id == user.id,
+    ))
+    if not row:
+        raise HTTPException(status_code=404, detail="Opportunity not found")
+    try:
+        set_application_status(db, user.id, row, payload["status"])
+        from app.models import NotionConnection
+        notion = db.get(NotionConnection, user.id)
+        if notion and notion.data_source_id:
+            from app.notion import upsert_opportunity_page
+            try:
+                upsert_opportunity_page(db, user.id, row)
+            except NotionAPIError as exc:
+                logger.warning("Notion status sync failed for user %s (%s)", user.id[:8], str(exc))
+        return {"ok": True, "status": row.application_status}
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
 
 
 @app.delete("/api/account")
