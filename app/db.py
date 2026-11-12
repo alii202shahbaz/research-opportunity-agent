@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine, event, inspect, text
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 from app.config import get_settings
@@ -46,3 +46,19 @@ def init_db() -> None:
     # Import models so SQLAlchemy registers all tables.
     from app import models  # noqa: F401
     Base.metadata.create_all(bind=engine)
+    # Lightweight forward-compatible migration for databases created before
+    # exact semester tracking was introduced. Existing profiles remain valid.
+    inspector = inspect(engine)
+    profile_columns = {column["name"] for column in inspector.get_columns("user_profiles")}
+    opportunity_columns = {column["name"] for column in inspector.get_columns("user_opportunities")}
+    with engine.begin() as connection:
+        profile_additions = {
+            "current_semester": "INTEGER",
+            "deadline_email_enabled": "BOOLEAN NOT NULL DEFAULT FALSE",
+            "deadline_emails_json": "TEXT NOT NULL DEFAULT '[]'",
+        }
+        for name, ddl in profile_additions.items():
+            if name not in profile_columns:
+                connection.execute(text(f"ALTER TABLE user_profiles ADD COLUMN {name} {ddl}"))
+        if "application_status" not in opportunity_columns:
+            connection.execute(text("ALTER TABLE user_opportunities ADD COLUMN application_status VARCHAR(40) NOT NULL DEFAULT 'Pending'"))
