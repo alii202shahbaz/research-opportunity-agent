@@ -14,8 +14,8 @@ A multi-user web application that collects an individual's academic profile, dis
 - Notion OAuth: users authorize a public integration, select an accessible parent page, and create a dedicated structured database under that page. No user is asked to paste an API token.
 - AES-256-GCM encryption for Notion access/refresh tokens at rest; HMAC-peppered hashes for app session tokens and OAuth state.
 - HTTP-only session cookie, CSRF protection, strict security headers, host validation, account deletion, and Notion disconnect/revocation.
-- A separate database-backed worker schedules each user at their own local time and sorts saved opportunities by known deadline.
-- A Render Blueprint provides a web service, worker, and managed PostgreSQL database. GitHub stores the source; Render runs the backend.
+- A database-backed scheduler processes each user's local-time schedule. The free deployment runs it hourly through GitHub Actions.
+- The web app is deployed as a Vercel Python Function; Supabase Free provides PostgreSQL.
 
 ## Architecture
 
@@ -31,7 +31,7 @@ PostgreSQL (tenant-scoped records) <---------- Notion workspace per user
   ^
   | SELECT ... FOR UPDATE SKIP LOCKED (job lease)
   |
-Background worker
+GitHub Actions scheduled runner (one-shot)
   |-- Brave Search API (queries contain broad interests, degree level, academic year and semester number, graduation year, and preferred countries)
   |-- bounded HTML fetch + BeautifulSoup extraction
   |-- Pydantic validation and profile matching
@@ -81,22 +81,28 @@ Requirements: Python 3.12+, a Notion public OAuth integration, and a Brave Searc
 
 SQLite is only for local single-user development. Use PostgreSQL for deployment and multi-user operation.
 
-## Deploy from GitHub to Render
+## Free deployment (Vercel + Supabase + GitHub Actions)
 
-GitHub is the source-code repository; it is not the runtime for this application. GitHub Pages cannot run the FastAPI backend or an always-on scheduler. Render runs the public web service, private background worker, and PostgreSQL database.
+This is a $0 hobby/portfolio deployment path. Vercel Hobby is intended for personal, non-commercial projects and has usage limits; check its current terms before inviting users or using it commercially. Supabase Free provides 500 MB of Postgres storage, may pause a project after a week of low activity, and does not include automatic backups. GitHub Free includes 2,000 Actions minutes/month for private repositories. The app is serverless on Vercel, so it has cold starts and no always-running worker.
 
-1. Create a **private GitHub repository** (recommended while developing), then push this project to its `main` branch. Do not upload `.env`, OAuth secrets, encryption keys, database dumps, or real user data.
-2. In Render, choose **New → Blueprint**, connect the GitHub repository, and select `render.yaml`.
-3. The Blueprint creates two services and a managed Postgres database. Its shared crypto environment group generates independent `APP_SECRET_KEY` and `TOKEN_ENCRYPTION_KEY` values for the web service and worker. Render prompts for provider credentials separately for each service because `sync: false` values cannot be placed in an environment group; enter the same Notion OAuth client ID/secret, Brave Search key, callback URL, and app URL for both.
-4. After Render assigns the web service hostname, set these values in both services:
-   - `APP_BASE_URL=https://YOUR-SERVICE.onrender.com`
-   - `NOTION_REDIRECT_URI=https://YOUR-SERVICE.onrender.com/oauth/notion/callback`
-   For the web service, set `ALLOWED_HOSTS=YOUR-SERVICE.onrender.com`. The worker does not receive public web traffic.
-5. Confirm the web service and worker share the same generated crypto environment group and the same Postgres `DATABASE_URL`.
-6. In the Notion Developer Portal, add that exact production callback URL. In the OAuth integration settings, keep only the required content capabilities enabled.
-7. Redeploy after setting environment variables. Confirm `/healthz` returns `{"status":"ok"}`, create a test account, complete OAuth, create a test database, and run a manual discovery.
+1. Create a **Supabase Free** project, preferably in Singapore. In Project Settings → Database, copy the **Session pooler** connection string and keep the password private. This is `DATABASE_URL`.
+2. In Vercel, import the private GitHub repository `alii202shahbaz/research-opportunity-agent`. Vercel should detect the Python/FastAPI entrypoint in root `index.py`; `vercel.json` includes the static dashboard files and sets the function region to Singapore.
+3. Add these Production environment variables in Vercel:
+   - `APP_ENV=production`
+   - `APP_BASE_URL=https://YOUR-PROJECT.vercel.app`
+   - `NOTION_REDIRECT_URI=https://YOUR-PROJECT.vercel.app/oauth/notion/callback`
+   - `ALLOWED_HOSTS=YOUR-PROJECT.vercel.app`
+   - `COOKIE_SECURE=true`
+   - `DATABASE_URL` = Supabase Session pooler connection string
+   - `APP_SECRET_KEY` and `TOKEN_ENCRYPTION_KEY` = two independent random secrets (generate them locally with Python; do not reuse one for both)
+   - `NOTION_OAUTH_CLIENT_ID`, `NOTION_OAUTH_CLIENT_SECRET`, and `BRAVE_SEARCH_API_KEY`
+   - Optional email pair: `RESEND_API_KEY` and `EMAIL_FROM`. Leave both unset to disable email delivery.
+4. Add the matching values as **GitHub repository Actions secrets** under Settings → Secrets and variables → Actions: `DATABASE_URL`, `APP_SECRET_KEY`, `TOKEN_ENCRYPTION_KEY`, `NOTION_OAUTH_CLIENT_ID`, `NOTION_OAUTH_CLIENT_SECRET`, `NOTION_REDIRECT_URI`, `BRAVE_SEARCH_API_KEY`, `APP_BASE_URL`, and optionally `RESEND_API_KEY` / `EMAIL_FROM`.
+5. In the Notion Developer Portal, register the exact production callback URL from step 3. Keep the integration's capabilities limited to the required read/insert/update content access.
+6. In GitHub → Actions, enable workflows if prompted. `Scheduled research jobs` runs hourly and can also be started manually using **Run workflow**. It only processes users whose saved run time is due, or users who requested a manual run. GitHub scheduled runs can be delayed, so daily discovery and reminders are approximate rather than exact-to-the-minute.
+7. Open the Vercel URL, register a test account, save a profile, connect Notion, and run a manual discovery. Check `/healthz` and the GitHub Actions run logs.
 
-The Blueprint uses Render's current plan identifiers for a continuously running web service, worker, and PostgreSQL. Review current pricing and plan availability before provisioning. You can use another host, but it must support persistent PostgreSQL, HTTPS, secure environment variables, a continuously running worker, and reliable backups. Render only prompts for `sync: false` values during the initial Blueprint creation; add any missing values manually in the Dashboard afterward.
+**Free-tier limitations:** Vercel Hobby is non-commercial and subject to monthly usage limits; Vercel Functions have a maximum execution duration. Supabase Free can pause after inactivity and provides no automatic backups. GitHub Actions has a monthly minutes allowance. Back up the database yourself and do not treat this stack as production-grade hosting for sensitive/high-stakes workloads. No Render resources are needed for this deployment path.
 
 ## Environment variables
 
@@ -146,8 +152,8 @@ GitHub Actions runs the test suite and a `pip-audit` dependency vulnerability ch
 
 ## Deadline reminders and application tracking
 
-Each account can opt in to deadline digests and provide up to 10 email addresses. The worker sends one combined message per user's local calendar day, at the saved daily update time, when at least one Pending opportunity has a confirmed deadline on the following day. The primary recipient is in To and additional recipients are BCC'd. A per-user/per-local-day database record plus a Resend idempotency key protects against duplicate delivery attempts. No email is sent when the preference is disabled, the recipient list is empty, or no matching deadline exists.
+Each account can opt in to deadline digests and provide up to 10 email addresses. The scheduled runner sends one combined message per user's local calendar day, on the first hourly run after the saved daily update time, when at least one Pending opportunity has a confirmed deadline on the following day. The primary recipient is in To and additional recipients are BCC'd. A per-user/per-local-day database record plus a Resend idempotency key protects against duplicate delivery attempts. No email is sent when the preference is disabled, the recipient list is empty, or no matching deadline exists.
 
-To enable delivery, set `RESEND_API_KEY` and `EMAIL_FROM` for both the web and worker services. The sender must be verified with Resend. The app does not send reminders until each user opts in and saves their recipient addresses.
+To enable delivery, set `RESEND_API_KEY` and `EMAIL_FROM` in Vercel Production environment variables and the matching GitHub Actions repository secrets. The sender must be verified with Resend. The app does not send reminders until each user opts in and saves their recipient addresses.
 
 Application status starts as **Pending**. Users can change it to **Waiting**, **Done**, **Accepted**, or **Rejected** from the dashboard. A still-Pending record whose deadline has passed is automatically moved to **Deadline Passed**. The system does not infer that an application was submitted or accepted, and it does not overwrite a user-confirmed Waiting/Done/Accepted/Rejected status.
