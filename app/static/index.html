@@ -74,7 +74,7 @@
             <fieldset class="form-section wide">
               <legend>Automation schedule</legend>
               <div><label for="timezone">Timezone</label><input id="timezone" maxlength="80" placeholder="e.g. Asia/Karachi" required><span class="hint">Use your local IANA timezone. Pakistan: Asia/Karachi.</span></div>
-              <div><label for="updateHour">Daily update time</label><select id="updateHour"></select><span class="hint">Automatic discovery follows your saved local-time schedule. Discover Now starts an on-demand scan immediately and does not wait for the scheduled run.</span></div>
+              <div><label for="updateHour">Daily update time</label><select id="updateHour"></select><span class="hint">Automatic discovery checks your saved local-time schedule every 15 minutes. A due scan normally starts within 15 minutes of your selected time. Discover Now starts immediately.</span></div>
               <div class="wide check-row"><input id="automation" type="checkbox" checked><label for="automation">Enable daily automatic discovery and Notion updates</label></div>
               <p id="scheduleStatus" class="hint wide">Next run: save your profile to schedule the first update.</p>
             </fieldset>
