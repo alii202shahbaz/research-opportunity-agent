@@ -7,7 +7,6 @@ const IDLE_TIMEOUT_MS = 10 * 60 * 1000;
 let lastActivityAt = Date.now();
 let sessionWatchTimer = null;
 let lastSessionPingAt = Date.now();
-const MANUAL_RUN_COOLDOWN_MS = 15 * 60 * 1000;
 let manualCooldownUntil = 0;
 let manualLeaseUntil = 0;
 let manualRequestInFlight = false;
