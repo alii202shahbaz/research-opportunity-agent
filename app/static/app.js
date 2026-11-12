@@ -218,7 +218,7 @@ function renderEmail(email) {
     return;
   }
   status.textContent = `Sender: ${email.sender || "not configured"} · ${email.message || "Email delivery is not ready."}`;
-  button.disabled = !email.configured;
+  button.disabled = false;
 }
 function renderNotion(n) {
   if (!n || !n.connected) {
