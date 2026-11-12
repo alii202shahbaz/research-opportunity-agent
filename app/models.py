@@ -60,6 +60,8 @@ class UserProfile(Base):
     timezone_name: Mapped[str] = mapped_column(String(80), default="UTC", nullable=False)
     update_hour: Mapped[int] = mapped_column(Integer, default=8, nullable=False)
     automation_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    deadline_email_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    deadline_emails_json: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
     manual_run_requested: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     next_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
     lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -126,7 +128,23 @@ class UserOpportunity(Base):
     intake_year: Mapped[int] = mapped_column(Integer, default=2027, nullable=False)
     intake_confirmed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     opportunity_status: Mapped[str] = mapped_column(String(40), default="Unknown", nullable=False)
+    application_status: Mapped[str] = mapped_column(String(40), default="Pending", nullable=False)
     notion_page_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
     first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
     last_verified_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
     user: Mapped[User] = relationship(back_populates="opportunities")
+
+
+class EmailDigestLog(Base):
+    __tablename__ = "email_digest_logs"
+    __table_args__ = (UniqueConstraint("user_id", "local_date", name="uq_email_digest_user_date"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
+    local_date: Mapped[date] = mapped_column(Date, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default="sending", nullable=False)
+    recipient_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    provider_message_id: Mapped[str] = mapped_column(String(120), default="", nullable=False)
+    error_code: Mapped[str] = mapped_column(String(80), default="", nullable=False)
+    attempted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
