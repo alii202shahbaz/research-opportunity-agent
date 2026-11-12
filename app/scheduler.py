@@ -107,12 +107,15 @@ def process_user(user_id: str) -> None:
         local_today = now.astimezone(ZoneInfo(profile.timezone_name or "UTC")).date()
         notion_direct_synced = 0
         notion_direct_errors = 0
+        direct_page_ids: dict[str, str] = {}
 
         # Send fresh discoveries to Notion before attempting the DB write.
         if notion_context:
             for candidate in candidates:
                 try:
-                    sync_discovered_candidate(notion_context, candidate)
+                    page_id = sync_discovered_candidate(notion_context, candidate)
+                    if page_id:
+                        direct_page_ids[str(candidate.official_source_url)] = page_id
                     notion_direct_synced += 1
                     time.sleep(0.35)
                 except NotionAPIError as exc:
@@ -121,6 +124,14 @@ def process_user(user_id: str) -> None:
 
         try:
             inserted, updated = persist_candidates(db, user_id, candidates) if candidates else (0, 0)
+            # Link direct Notion writes to their local rows so the regular sync
+            # path updates the same pages rather than creating duplicates.
+            if direct_page_ids:
+                for row in db.scalars(select(UserOpportunity).where(UserOpportunity.user_id == user_id)).all():
+                    page_id = direct_page_ids.get(row.canonical_url)
+                    if page_id and not row.notion_page_id:
+                        row.notion_page_id = page_id
+                db.commit()
         except Exception as exc:
             db.rollback()
             logger.exception("Database persistence failed for user %s (%s)", user_id[:8], type(exc).__name__)
