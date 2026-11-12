@@ -1,4 +1,4 @@
-# Research Opportunity Agent
+# OppFindAgent
 
 A multi-user web application that collects an individual's academic profile, discovers relevant funded research opportunities, validates extracted fields, and syncs matching records into that user's own Notion workspace on a daily schedule.
 
@@ -14,7 +14,7 @@ A multi-user web application that collects an individual's academic profile, dis
 - Notion OAuth: users authorize a public integration, select an accessible parent page, and create a dedicated structured database under that page. No user is asked to paste an API token.
 - AES-256-GCM encryption for Notion access/refresh tokens at rest; HMAC-peppered hashes for app session tokens and OAuth state.
 - HTTP-only session cookie, CSRF protection, strict security headers, host validation, account deletion, and Notion disconnect/revocation.
-- A database-backed scheduler processes each user's local-time schedule. The free deployment checks due work every six hours through GitHub Actions; each user's discovery itself runs once daily according to their profile.
+- A database-backed scheduler processes each user's local-time schedule. Vercel Cron uses 24 UTC-hour slots (one daily invocation per slot) to check due work hourly on the Hobby plan; each user's discovery itself runs once daily according to their profile. Hobby cron execution can start anywhere within its scheduled UTC hour.
 - The web app is deployed as a Vercel Python Function; Supabase Free provides PostgreSQL.
 
 ## Architecture
@@ -31,7 +31,7 @@ PostgreSQL (tenant-scoped records) <---------- Notion workspace per user
   ^
   | SELECT ... FOR UPDATE SKIP LOCKED (job lease)
   |
-GitHub Actions scheduled runner (one-shot)
+Vercel Cron (24 UTC-hourly slots; protected worker route)
   |-- Tavily Search API (queries contain broad interests, degree level, academic year and semester number, graduation year, and preferred countries)
   |-- bounded HTML fetch + BeautifulSoup extraction
   |-- Pydantic validation and profile matching
@@ -81,7 +81,7 @@ Requirements: Python 3.12+, a Notion public OAuth integration, and a Tavily Sear
 
 SQLite is only for local single-user development. Use PostgreSQL for deployment and multi-user operation.
 
-## Free deployment (Vercel + Supabase + GitHub Actions)
+## Free deployment (Vercel + Supabase + Vercel Cron)
 
 This is a $0 hobby/portfolio deployment path. Vercel Hobby is intended for personal, non-commercial projects and has usage limits; check its current terms before inviting users or using it commercially. Supabase Free provides 500 MB of Postgres storage, may pause a project after a week of low activity, and does not include automatic backups. Use its Transaction pooler (port 6543) for this serverless app when available; the Session pooler (port 5432) is an acceptable fallback. GitHub Free currently includes $12/month in compute usage for standard runners on private repositories; additional usage is blocked if no payment method is on file, but can be billed if one is added. The app is serverless on Vercel, so it has cold starts and no always-running worker.
 
@@ -96,13 +96,13 @@ This is a $0 hobby/portfolio deployment path. Vercel Hobby is intended for perso
    - `DATABASE_URL` = Supabase Transaction pooler URI (or Session pooler URI if Transaction is not shown)
    - `APP_SECRET_KEY` and `TOKEN_ENCRYPTION_KEY` = two independent random secrets (generate them locally with Python; do not reuse one for both)
    - `NOTION_OAUTH_CLIENT_ID`, `NOTION_OAUTH_CLIENT_SECRET`, and `TAVILY_API_KEY`
-   - Optional email pair: `RESEND_API_KEY` and `EMAIL_FROM`. Leave both unset to disable email delivery.
-4. Add the matching values as **GitHub repository Actions secrets** under Settings → Secrets and variables → Actions: `DATABASE_URL`, `APP_SECRET_KEY`, `TOKEN_ENCRYPTION_KEY`, `NOTION_OAUTH_CLIENT_ID`, `NOTION_OAUTH_CLIENT_SECRET`, `NOTION_REDIRECT_URI`, `TAVILY_API_KEY`, `APP_BASE_URL`, and optionally `RESEND_API_KEY` / `EMAIL_FROM`.
+   - Email: `EMAIL_PROVIDER=smtp`, `EMAIL_FROM`, `GMAIL_USER`, and `GMAIL_APP_PASSWORD` for Gmail SMTP (or `RESEND_API_KEY` plus `EMAIL_FROM` for Resend).
+4. Vercel Cron reads Production environment variables directly from Vercel. GitHub Actions secrets are not required for the scheduled worker; the separate CI workflow only runs tests and dependency audits.
 5. In the Notion Developer Portal, register the exact production callback URL from step 3. Keep the integration's capabilities limited to the required read/insert/update content access.
-6. In GitHub → Actions, enable workflows if prompted. `Scheduled research jobs` runs every six hours and can also be started manually using **Run workflow**. It only processes users whose saved run time is due, or users who requested a manual run. GitHub scheduled runs can be delayed, so daily discovery and reminders are approximate rather than exact-to-the-minute.
-7. Open the Vercel URL, register a test account, save a profile, connect Notion, and run a manual discovery. Check `/healthz` and the GitHub Actions run logs.
+6. Vercel automatically registers the 24 cron entries in `vercel.json`, one for each UTC hour. Each entry can start anywhere within its UTC hour on Hobby. Each invocation claims one due user and processes it. **Run discovery now** queues a manual run for the next hourly slot.
+7. Open the Vercel URL, register a test account, save a profile, connect Notion, and run a manual discovery. Check `/healthz` and the Vercel runtime logs.
 
-**Free-tier limitations:** Vercel Hobby is non-commercial and subject to monthly usage limits; Vercel Functions have a maximum execution duration. Supabase Free can pause after inactivity and provides no automatic backups. GitHub Actions has a monthly minutes allowance. Back up the database yourself and do not treat this stack as production-grade hosting for sensitive/high-stakes workloads. No Render resources are needed for this deployment path.
+**Free-tier limitations:** Vercel Hobby is non-commercial and subject to monthly usage limits; Vercel Functions have a maximum execution duration. Supabase Free can pause after inactivity and provides no automatic backups. Vercel Hobby cron invocations are best-effort and can be delayed within the UTC hour; Vercel does not automatically retry a failed cron invocation. Back up the database yourself and do not treat this stack as production-grade hosting for sensitive/high-stakes workloads. No Render resources are needed for this deployment path.
 
 ## Environment variables
 
@@ -152,17 +152,17 @@ GitHub Actions runs the test suite and a `pip-audit` dependency vulnerability ch
 
 ## Recovery, Notion mirroring, and data retention
 
-- The worker checks the database every six hours, while each user's discovery is due once per day according to their saved schedule. These requests also help keep a Supabase Free project active, but Supabase says activity thresholds are not guaranteed; a Free project can still be paused after a low-activity week. A few real database requests per day are usually enough, not a promise. See the [Supabase inactivity guidance](https://supabase.com/docs/guides/platform/free-project-pausing).
+- Vercel Cron invokes the protected worker route once per UTC hour using 24 separate daily entries. Each invocation claims one due user, so multiple users due together are serialized across later hourly slots. Hobby timing can drift within the selected UTC hour, and failed invocations are not automatically retried. These requests also help keep a Supabase Free project active, but Supabase says activity thresholds are not guaranteed; a Free project can still be paused after a low-activity week. A few real database requests per day are usually enough, not a promise. See the [Supabase inactivity guidance](https://supabase.com/docs/guides/platform/free-project-pausing).
 - When a profile and Notion credentials have already been loaded successfully, new discoveries are mirrored to Notion before the app attempts to persist them in PostgreSQL. If that PostgreSQL write fails, the worker attempts an opt-in recovery email containing the current run's findings, then leaves the job lease to expire so a later worker can retry.
-- Recovery email uses the user's saved email opt-in and recipient list plus the configured Resend sender. It is not sent when email reminders are disabled or the provider is not configured.
+- Recovery email uses the user's saved email opt-in and recipient list plus the configured email sender (Gmail SMTP or Resend). It is not sent when email reminders are disabled or the provider is not configured.
 - This is a best-effort fallback for a database write failure during an active run, **not** full protection against a total database outage. If PostgreSQL is unavailable before the worker can load the user profile, Notion token, or recipients, the worker cannot identify which user to process or authenticate to Notion. A separate durable configuration/credential store and an independent backup/restore process would be required for that stronger guarantee.
 - Unreviewed opportunities with a known deadline are archived 30 days after that deadline: their Notion page is moved to Trash first, then the local opportunity row is deleted. If Notion is unavailable, deletion is deferred. Opportunities without a reliable deadline and user-managed application statuses (Waiting, Done, Accepted, Rejected) are preserved. The automatically generated Deadline Passed status is eligible for cleanup after the 30-day grace period.
 - This retention rule is deliberately based on the deadline, not the discovery date, so an opportunity with a future deadline is not deleted just because it has been in the database for a month.
 
 ## Deadline reminders and application tracking
 
-Each account can opt in to deadline digests and provide up to 10 email addresses. The scheduled runner sends one combined message per user's local calendar day, on the first scheduled run after the saved daily update time (within about six hours, subject to GitHub scheduling delays), when at least one Pending opportunity has a confirmed deadline on the following day. The primary recipient is in To and additional recipients are BCC'd. A per-user/per-local-day database record plus a Resend idempotency key protects against duplicate delivery attempts. No email is sent when the preference is disabled, the recipient list is empty, or no matching deadline exists.
+Each account can opt in to deadline digests and provide up to 10 email addresses. The scheduled runner sends one combined message per user's local calendar day, on the first scheduled run after the saved daily update time (within the selected local hour, subject to Vercel Hobby's up-to-59-minute scheduling window), when at least one Pending opportunity has a confirmed deadline on the following day. The primary recipient is in To and additional recipients are BCC'd. A per-user/per-local-day database record protects against duplicate delivery attempts. No email is sent when the preference is disabled, the recipient list is empty, or no matching deadline exists.
 
-To enable delivery, set `RESEND_API_KEY` and `EMAIL_FROM` in Vercel Production environment variables and the matching GitHub Actions repository secrets. The sender must be verified with Resend. The app does not send reminders until each user opts in and saves their recipient addresses.
+For Gmail SMTP, set `EMAIL_PROVIDER=smtp`, `EMAIL_FROM`, `GMAIL_USER`, and `GMAIL_APP_PASSWORD` in Vercel Production environment variables. The sender address must match the Gmail account. Alternatively, configure `EMAIL_PROVIDER=resend`, `RESEND_API_KEY`, and a verified `EMAIL_FROM`. The app does not send reminders until each user opts in and saves their recipient addresses.
 
 Application status starts as **Pending**. Users can change it to **Waiting**, **Done**, **Accepted**, or **Rejected** from the dashboard. A still-Pending record whose deadline has passed is automatically moved to **Deadline Passed**. The system does not infer that an application was submitted or accepted, and it does not overwrite a user-confirmed Waiting/Done/Accepted/Rejected status.
