@@ -3,14 +3,15 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="OppFindAgent discovers funded research opportunities matched to your academic profile and keeps your Notion workspace organized.">
   <meta name="theme-color" content="#101827">
-  <title>Research Opportunity Agent</title>
+  <title>OppFindAgent — Research Opportunity Discovery</title>
   <link rel="stylesheet" href="/static/styles.css">
   <script src="/static/app.js" defer></script>
 </head>
 <body>
   <header class="topbar">
-    <div class="brand"><span class="brand-mark">R</span><span>Research Agent</span></div>
+    <div class="brand"><span class="brand-mark">O</span><span>OppFindAgent</span></div>
     <div id="accountNav" class="hidden nav-actions"><span id="userEmail" class="muted small"></span><button id="logoutBtn" class="button button-ghost">Sign out</button></div>
   </header>
 
@@ -21,9 +22,9 @@
     </section>
     <section id="authView" class="auth-layout hidden">
       <div class="hero-copy">
-        <p class="eyebrow">RESEARCH DISCOVERY · AUTOMATION</p>
+        <p class="eyebrow">OPPORTUNITY DISCOVERY · AUTOMATION</p>
         <h1>Find the research opportunities you should not miss.</h1>
-        <p class="lead">A private research assistant that learns your academic profile, finds relevant funded programs and keeps your Notion workspace organized every day.</p>
+        <p class="lead">OppFindAgent is your private research opportunity assistant. It learns your academic profile, finds relevant funded programs and keeps your Notion workspace organized.</p>
         <div class="trust-line"><span class="dot"></span> Your Notion connection is private to your account</div>
       </div>
       <div class="panel auth-panel">
@@ -43,7 +44,7 @@
 
     <section id="dashboardView" class="hidden">
       <div class="page-heading">
-        <div><p class="eyebrow">YOUR PRIVATE WORKSPACE</p><h1>Research dashboard</h1><p class="muted">Set your profile once. The agent handles daily discovery and Notion synchronization.</p></div>
+        <div><p class="eyebrow">YOUR PRIVATE WORKSPACE</p><h1>Opportunity dashboard</h1><p class="muted">Set your profile once. The agent handles daily discovery and Notion synchronization.</p></div>
         <button id="runNowBtn" class="button button-primary">Run discovery now</button>
       </div>
       <div id="notice" class="notice hidden" role="status"></div>
@@ -73,14 +74,14 @@
             <fieldset class="form-section wide">
               <legend>Automation schedule</legend>
               <div><label for="timezone">Timezone</label><input id="timezone" maxlength="80" placeholder="e.g. Asia/Karachi" required><span class="hint">Use your local IANA timezone. Pakistan: Asia/Karachi.</span></div>
-              <div><label for="updateHour">Daily update time</label><select id="updateHour"></select><span class="hint">The free scheduler checks each UTC hour. On Vercel Hobby, it can start at any point within the selected local hour, not necessarily at :00.</span></div>
+              <div><label for="updateHour">Daily update time</label><select id="updateHour"></select><span class="hint">Vercel Hobby may start the check anywhere within the selected local hour. For a 01:00 schedule, expect execution between 01:00 and 01:59 — not exactly at :00.</span></div>
               <div class="wide check-row"><input id="automation" type="checkbox" checked><label for="automation">Enable daily automatic discovery and Notion updates</label></div>
               <p id="scheduleStatus" class="hint wide">Next run: save your profile to schedule the first update.</p>
             </fieldset>
             <fieldset class="form-section wide">
               <legend>Email notifications</legend>
               <div class="wide check-row"><input id="deadlineEmailEnabled" type="checkbox"><label for="deadlineEmailEnabled">Email me a daily deadline digest</label></div>
-              <div class="wide"><label for="deadlineEmails">Recipient email addresses</label><input id="deadlineEmails" type="text" maxlength="2000" placeholder="you@example.com, another@example.com"><span class="hint">These are the recipients. The sender is configured separately as oppfindagent@gmail.com. A daily digest is sent only when pending opportunities have a deadline tomorrow.</span></div>
+              <div class="wide"><label for="deadlineEmails">Recipient email addresses</label><input id="deadlineEmails" type="text" maxlength="2000" placeholder="you@example.com, another@example.com"><span class="hint">These are the recipients. The sender is OppFindAgent (oppfindagent@gmail.com). A daily digest is sent only when pending opportunities have a deadline tomorrow.</span></div>
               <div class="wide email-config">
                 <p id="emailSenderStatus" class="hint" role="status">Checking email sender configuration…</p>
                 <button id="testEmailBtn" type="button" class="button button-secondary" disabled>Send a test email to my account address</button>
@@ -111,7 +112,7 @@
               <div class="inline-controls"><input id="pageSearch" placeholder="Search pages shared with the integration"><button id="searchPagesBtn" class="button button-secondary">Search</button></div>
               <div id="pageResults" class="page-results"></div>
               <button id="createDatabaseBtn" class="button button-primary full" disabled>Create research database here</button>
-              <p class="hint">Only pages connected to this integration appear here. To add another page later, open that page in Notion, choose <strong>••• → Connections</strong>, and connect <strong>Research Opportunity Agent</strong>. Then search again here. The agent creates a new database; it does not modify existing pages.</p>
+              <p class="hint">Only pages connected to this integration appear here. To add another page later, open that page in Notion, choose <strong>••• → Connections</strong>, and connect <strong>OppFindAgent</strong>. Then search again here. The agent creates a new database; it does not modify existing pages.</p>
             </div>
             <button id="disconnectNotionBtn" class="button button-ghost full danger-text">Disconnect Notion</button>
           </div>
@@ -123,7 +124,7 @@
         <div id="runSummary" class="muted small"></div>
         <div id="opportunitiesList" class="empty-state"><div class="empty-icon">⌕</div><h3>Your results will appear here</h3><p>Save your profile and run discovery. The discovery worker uses the configured Tavily search API.</p></div>
       </section>
-      <footer class="dashboard-footer"><span>Research Agent · Secure multi-user workspace</span><button id="deleteAccountBtn" class="text-button danger-text">Delete my account and data</button></footer>
+      <footer class="dashboard-footer"><span>OppFindAgent · Secure multi-user workspace</span><button id="deleteAccountBtn" class="text-button danger-text">Delete my account and data</button></footer>
     </section>
   </main>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
