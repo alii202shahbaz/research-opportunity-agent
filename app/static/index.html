@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#101827">
+  <title>Research Opportunity Agent</title>
+  <link rel="stylesheet" href="/static/styles.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="brand-mark">R</span><span>Research Agent</span></div>
+    <div id="accountNav" class="hidden nav-actions"><span id="userEmail" class="muted small"></span><button id="logoutBtn" class="button button-ghost">Sign out</button></div>
+  </header>
+
+  <main class="container">
+    <section id="authView" class="auth-layout">
+      <div class="hero-copy">
+        <p class="eyebrow">RESEARCH DISCOVERY · AUTOMATION</p>
+        <h1>Find the research opportunities you should not miss.</h1>
+        <p class="lead">A private research assistant that learns your academic profile, finds relevant funded programs and keeps your Notion workspace organized every day.</p>
+        <div class="trust-line"><span class="dot"></span> Your Notion connection is private to your account</div>
+      </div>
+      <div class="panel auth-panel">
+        <div class="tabs"><button id="loginTab" class="tab active">Sign in</button><button id="registerTab" class="tab">Create account</button></div>
+        <form id="authForm">
+          <label for="authEmail">Email address</label>
+          <input id="authEmail" type="email" autocomplete="email" required maxlength="320" placeholder="you@example.com">
+          <label for="authPassword">Password</label>
+          <input id="authPassword" type="password" autocomplete="current-password" required minlength="12" maxlength="128" placeholder="At least 12 characters">
+          <p id="passwordHint" class="hint hidden">Use at least 12 characters, including upper-case, lower-case, a number and a symbol.</p>
+          <button id="authSubmit" class="button button-primary full" type="submit">Sign in</button>
+          <p id="authError" class="error" role="alert"></p>
+        </form>
+        <p class="fine-print">By creating an account, you agree to use the service responsibly. Do not enter passwords or credentials from other services.</p>
+      </div>
+    </section>
+
+    <section id="dashboardView" class="hidden">
+      <div class="page-heading">
+        <div><p class="eyebrow">YOUR PRIVATE WORKSPACE</p><h1>Research dashboard</h1><p class="muted">Set your profile once. The agent handles daily discovery and Notion synchronization.</p></div>
+        <button id="runNowBtn" class="button button-primary">Run discovery now</button>
+      </div>
+      <div id="notice" class="notice hidden" role="status"></div>
+      <div class="dashboard-grid">
+        <section class="panel profile-panel">
+          <div class="section-heading"><div><h2>Academic profile</h2><p class="muted small">Used to personalize discovery and eligibility screening.</p></div><span id="profileSaved" class="status-pill">Not configured</span></div>
+          <form id="profileForm" class="form-grid">
+            <div><label for="degree">Degree / program</label><input id="degree" maxlength="120" placeholder="e.g. BS Computer Science"></div>
+            <div><label for="university">University / institution</label><input id="university" maxlength="240" placeholder="Your institution"></div>
+            <div><label for="cgpa">CGPA / GPA (optional)</label><input id="cgpa" type="number" min="0" max="100" step="0.01" placeholder="e.g. 3.45"></div>
+            <div><label for="cgpaScale">Grading scale</label><select id="cgpaScale"><option value="4">4.0 scale</option><option value="5">5.0 scale</option><option value="10">10.0 scale</option><option value="100">100-point scale</option></select></div>
+            <div><label for="currentYear">Current academic year</label><input id="currentYear" maxlength="80" placeholder="e.g. Third year"></div>
+            <div><label for="currentSemester">Current semester (if applicable)</label><input id="currentSemester" type="number" min="1" max="16" step="1" placeholder="e.g. 5"></div>
+            <div><label for="graduationYear">Expected graduation year</label><input id="graduationYear" type="number" min="2000" max="2100" placeholder="e.g. 2028"></div>
+            <div><label for="citizenship">Citizenship</label><input id="citizenship" maxlength="100" placeholder="e.g. Pakistan"></div>
+            <div class="wide"><label for="interests">Research interests <span class="required">*</span></label><textarea id="interests" rows="2" required placeholder="Computer Vision, Computer Architecture, Deepfake Detection, AI/ML"></textarea><span class="hint">Separate interests with commas. Add specific topics too, such as RISC-V, visual recognition or media forensics.</span><span class="hint">Privacy: discovery sends broad interests, degree level, current academic year, graduation year, intake and preferred countries to the search provider. Your CGPA, citizenship, email and Notion tokens are not sent.</span></div>
+            <div class="wide"><label for="countries">Preferred countries (optional)</label><input id="countries" placeholder="Worldwide, or comma-separated countries"></div>
+            <div><label for="funding">Funding preference</label><select id="funding"><option value="funded_only">Prioritize fully funded; keep unclear funding for review</option><option value="funded_and_partial">Fully and partially funded</option><option value="any">Include all opportunities</option></select></div>
+            <div><label for="intakeSeason">Intake season</label><select id="intakeSeason"><option>Summer</option><option>Winter</option><option>Spring</option><option>Autumn</option><option>Any</option></select></div>
+            <div><label for="intakeYear">Target intake year</label><input id="intakeYear" type="number" min="2026" max="2035" value="2027" required></div>
+            <div><label for="timezone">Your timezone (IANA)</label><input id="timezone" maxlength="80" placeholder="e.g. Asia/Karachi" required></div>
+            <div><label for="updateHour">Daily update time</label><select id="updateHour"></select></div>
+            <div class="wide check-row"><input id="automation" type="checkbox" checked><label for="automation">Enable daily automatic discovery and Notion updates</label></div>
+            <div class="wide form-actions"><button class="button button-primary" type="submit">Save profile</button><span id="profileMessage" class="muted small"></span></div>
+          </form>
+        </section>
+
+        <aside class="panel notion-panel">
+          <div class="section-heading"><div><h2>Notion connection</h2><p class="muted small">OAuth authorization — no API token sharing.</p></div><span id="notionStatus" class="status-pill">Not connected</span></div>
+          <div id="notionDisconnected">
+            <div class="notion-logo">N</div>
+            <h3>Connect your workspace</h3>
+            <p class="muted small">You authorize the app with Notion. Then select a page you choose, and the agent creates its opportunity database beneath it.</p>
+            <button id="connectNotionBtn" class="button button-dark full">Connect Notion securely</button>
+            <p class="hint">The integration needs read, insert and update content permissions only. It does not need access to your entire workspace.</p>
+          </div>
+          <div id="notionConnected" class="hidden">
+            <div class="connected-card"><span class="connected-icon">✓</span><div><strong id="workspaceName">Workspace connected</strong><p class="muted small">Authorization is encrypted and stored server-side.</p></div></div>
+            <div id="databaseReady" class="hidden">
+              <p class="success-text">Your research database is ready.</p>
+              <a id="databaseLink" class="text-link" href="#" target="_blank" rel="noopener noreferrer">Open Notion database ↗</a>
+            </div>
+            <div id="databaseSetup">
+              <label for="pageSearch">Choose a parent page</label>
+              <div class="inline-controls"><input id="pageSearch" placeholder="Search pages shared with the integration"><button id="searchPagesBtn" class="button button-secondary">Search</button></div>
+              <div id="pageResults" class="page-results"></div>
+              <button id="createDatabaseBtn" class="button button-primary full" disabled>Create research database here</button>
+              <p class="hint">Only pages explicitly shared during Notion authorization appear here. The agent creates a new database; it does not modify existing pages.</p>
+            </div>
+            <button id="disconnectNotionBtn" class="button button-ghost full danger-text">Disconnect Notion</button>
+          </div>
+        </aside>
+      </div>
+
+      <section class="panel opportunities-panel">
+        <div class="section-heading"><div><h2>Discovered opportunities</h2><p class="muted small">Sorted by closest known deadline. Unverified dates are never invented.</p></div><span id="opportunityCount" class="status-pill">0 found</span></div>
+        <div id="runSummary" class="muted small"></div>
+        <div id="opportunitiesList" class="empty-state"><div class="empty-icon">⌕</div><h3>Your results will appear here</h3><p>Save your profile and run discovery. Add a Brave Search API key in the deployment environment to enable searches.</p></div>
+      </section>
+      <footer class="dashboard-footer"><span>Research Agent · Secure multi-user workspace</span><button id="deleteAccountBtn" class="text-button danger-text">Delete my account and data</button></footer>
+    </section>
+  </main>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+</body>
+</html>
