@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.db import SessionLocal
 from app.discovery import discover_for_profile, persist_candidates
+from app.emailer import refresh_application_statuses, send_deadline_digest
 from app.models import NotionConnection, UserOpportunity, UserProfile
 from app.notion import NotionAPIError, upsert_opportunity_page
 
@@ -35,17 +36,21 @@ def process_user(user_id: str) -> None:
         profile = db.get(UserProfile, user_id)
         if not profile:
             return
-        candidates = discover_for_profile(profile)
-        inserted, updated = persist_candidates(db, user_id, candidates)
+        now = datetime.now(timezone.utc)
+        scheduled_due = bool(profile.next_run_at and (
+            profile.next_run_at.replace(tzinfo=timezone.utc) if profile.next_run_at.tzinfo is None else profile.next_run_at
+        ) <= now)
+        manual_requested = profile.manual_run_requested
+        candidates = discover_for_profile(profile) if (profile.automation_enabled or manual_requested) else []
+        inserted, updated = persist_candidates(db, user_id, candidates) if candidates else (0, 0)
+        local_today = now.astimezone(ZoneInfo(profile.timezone_name or "UTC")).date()
+        expired_count = refresh_application_statuses(db, user_id, local_today)
         notion = db.get(NotionConnection, user_id)
         synced = 0
         sync_errors = 0
         if notion and notion.data_source_id:
             rows = db.scalars(
                 select(UserOpportunity).where(UserOpportunity.user_id == user_id)
-                # Drain never-synced rows first so the per-run cap cannot
-                # permanently starve older opportunities when a profile has
-                # more results than MAX_PAGES_PER_RUN.
                 .order_by(UserOpportunity.notion_page_id.is_(None).desc(),
                           UserOpportunity.deadline.is_(None), UserOpportunity.deadline.asc(),
                           UserOpportunity.relevance_score.desc())
@@ -55,14 +60,21 @@ def process_user(user_id: str) -> None:
                 try:
                     upsert_opportunity_page(db, user_id, row)
                     synced += 1
-                    time.sleep(0.35)  # stay below typical Notion request limits
+                    time.sleep(0.35)
                 except NotionAPIError as exc:
                     sync_errors += 1
                     logger.warning("Notion sync failed for user %s (%s)", user_id[:8], str(exc))
-        profile.last_run_at = datetime.now(timezone.utc)
+        email_result = "not_due"
+        if profile.deadline_email_enabled and scheduled_due:
+            email_result = send_deadline_digest(db, profile, now=now)
+        profile.last_run_at = now
         profile.last_run_status = "partial" if sync_errors else "success"
-        profile.last_run_summary = f"{len(candidates)} candidates; {inserted} new; {updated} updated; {synced} Notion rows synced; {sync_errors} sync errors"[:500]
-        profile.next_run_at = next_scheduled_run(profile) if profile.automation_enabled else None
+        profile.last_run_summary = (
+            f"{len(candidates)} candidates; {inserted} new; {updated} updated; "
+            f"{synced} Notion rows synced; {sync_errors} sync errors; "
+            f"{expired_count} deadlines passed; email digest: {email_result}"
+        )[:500]
+        profile.next_run_at = next_scheduled_run(profile) if (profile.automation_enabled or profile.deadline_email_enabled) else None
         profile.manual_run_requested = False
         profile.lease_until = None
         db.commit()
@@ -75,7 +87,7 @@ def process_user(user_id: str) -> None:
             profile.last_run_at = datetime.now(timezone.utc)
             profile.last_run_status = "error"
             profile.last_run_summary = f"Job failed: {type(exc).__name__}"[:500]
-            profile.next_run_at = (datetime.now(timezone.utc) + timedelta(minutes=30)) if profile.automation_enabled else None
+            profile.next_run_at = (datetime.now(timezone.utc) + timedelta(minutes=30)) if (profile.automation_enabled or profile.deadline_email_enabled) else None
             profile.manual_run_requested = False
             profile.lease_until = None
             db.commit()
@@ -92,7 +104,7 @@ def claim_due_users(limit: int = 1) -> list[str]:
             .where(
                 or_(
                     UserProfile.manual_run_requested.is_(True),
-                    (UserProfile.automation_enabled.is_(True) & UserProfile.next_run_at.is_not(None) & (UserProfile.next_run_at <= now)),
+                    ((UserProfile.automation_enabled.is_(True) | UserProfile.deadline_email_enabled.is_(True)) & UserProfile.next_run_at.is_not(None) & (UserProfile.next_run_at <= now)),
                 ),
                 or_(UserProfile.lease_until.is_(None), UserProfile.lease_until < now),
             )
