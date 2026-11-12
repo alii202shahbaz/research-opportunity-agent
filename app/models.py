@@ -63,6 +63,7 @@ class UserProfile(Base):
     deadline_email_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     deadline_emails_json: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
     manual_run_requested: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    manual_cooldown_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     next_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
     lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
