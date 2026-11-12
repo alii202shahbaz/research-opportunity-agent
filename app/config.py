@@ -28,6 +28,8 @@ class Settings(BaseSettings):
     notion_api_version: str = "2026-03-11"
 
     brave_search_api_key: str = ""
+    resend_api_key: str = ""
+    email_from: str = ""
     search_results_per_query: int = 8
     max_search_queries_per_run: int = 10
     max_pages_per_run: int = 30
@@ -94,6 +96,8 @@ class Settings(BaseSettings):
                 raise ValueError("Notion OAuth credentials are required in production")
             if not self.brave_search_api_key:
                 raise ValueError("BRAVE_SEARCH_API_KEY is required to enable discovery")
+            if bool(self.resend_api_key) != bool(self.email_from):
+                raise ValueError("Configure both RESEND_API_KEY and EMAIL_FROM, or leave both empty")
             if not self.cookie_secure:
                 raise ValueError("COOKIE_SECURE must be true in production")
             if not self.app_base_url.startswith("https://"):
