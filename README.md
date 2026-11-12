@@ -8,7 +8,7 @@ A multi-user web application that collects an individual's academic profile, dis
 
 - User registration and sign-in with Argon2id password hashing.
 - User-specific academic profiles: degree, university, CGPA with selectable grading scale (4, 5, 10 or 100), academic year and exact current semester, graduation year, citizenship, research interests, target intake, countries, funding preference, timezone, and daily run time.
-- Research discovery through the Brave Search API; pages are fetched with bounded size/timeouts and parsed with BeautifulSoup.
+- Research discovery through the Tavily Search API; pages are fetched with bounded size/timeouts and parsed with BeautifulSoup.
 - Extracts funding signals, stipend clues, tuition/travel/housing indicators, application/deadline clues, source URL, and research domain.
 - Screens explicit degree, academic-year, semester, graduation-year, citizenship and same-scale GPA rules; uncertain or missing data stays unknown/possibly eligible rather than being guessed.
 - Notion OAuth: users authorize a public integration, select an accessible parent page, and create a dedicated structured database under that page. No user is asked to paste an API token.
@@ -32,7 +32,7 @@ PostgreSQL (tenant-scoped records) <---------- Notion workspace per user
   | SELECT ... FOR UPDATE SKIP LOCKED (job lease)
   |
 GitHub Actions scheduled runner (one-shot)
-  |-- Brave Search API (queries contain broad interests, degree level, academic year and semester number, graduation year, and preferred countries)
+  |-- Tavily Search API (queries contain broad interests, degree level, academic year and semester number, graduation year, and preferred countries)
   |-- bounded HTML fetch + BeautifulSoup extraction
   |-- Pydantic validation and profile matching
   +-- Notion page insert/update
@@ -42,7 +42,7 @@ Each profile, session, Notion connection, and saved opportunity is keyed by an i
 
 ## Local setup
 
-Requirements: Python 3.12+, a Notion public OAuth integration, and a Brave Search API key.
+Requirements: Python 3.12+, a Notion public OAuth integration, and a Tavily Search API key.
 
 1. Create an environment file:
 
@@ -57,7 +57,7 @@ Requirements: Python 3.12+, a Notion public OAuth integration, and a Brave Searc
    python -c "import base64,secrets; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())"
    ```
 
-3. Set `NOTION_OAUTH_CLIENT_ID`, `NOTION_OAUTH_CLIENT_SECRET`, `BRAVE_SEARCH_API_KEY`, and the local redirect URI `http://localhost:8000/oauth/notion/callback`.
+3. Set `NOTION_OAUTH_CLIENT_ID`, `NOTION_OAUTH_CLIENT_SECRET`, `TAVILY_API_KEY`, and the local redirect URI `http://localhost:8000/oauth/notion/callback`.
 
 4. In the Notion Developer Portal, create a **public OAuth integration**. Add the exact redirect URI. Enable only the content capabilities required by this application: read content, insert content, and update content. Do not enable unrelated comment, user, or workspace-admin capabilities.
 
@@ -95,9 +95,9 @@ This is a $0 hobby/portfolio deployment path. Vercel Hobby is intended for perso
    - `COOKIE_SECURE=true`
    - `DATABASE_URL` = Supabase Transaction pooler URI (or Session pooler URI if Transaction is not shown)
    - `APP_SECRET_KEY` and `TOKEN_ENCRYPTION_KEY` = two independent random secrets (generate them locally with Python; do not reuse one for both)
-   - `NOTION_OAUTH_CLIENT_ID`, `NOTION_OAUTH_CLIENT_SECRET`, and `BRAVE_SEARCH_API_KEY`
+   - `NOTION_OAUTH_CLIENT_ID`, `NOTION_OAUTH_CLIENT_SECRET`, and `TAVILY_API_KEY`
    - Optional email pair: `RESEND_API_KEY` and `EMAIL_FROM`. Leave both unset to disable email delivery.
-4. Add the matching values as **GitHub repository Actions secrets** under Settings → Secrets and variables → Actions: `DATABASE_URL`, `APP_SECRET_KEY`, `TOKEN_ENCRYPTION_KEY`, `NOTION_OAUTH_CLIENT_ID`, `NOTION_OAUTH_CLIENT_SECRET`, `NOTION_REDIRECT_URI`, `BRAVE_SEARCH_API_KEY`, `APP_BASE_URL`, and optionally `RESEND_API_KEY` / `EMAIL_FROM`.
+4. Add the matching values as **GitHub repository Actions secrets** under Settings → Secrets and variables → Actions: `DATABASE_URL`, `APP_SECRET_KEY`, `TOKEN_ENCRYPTION_KEY`, `NOTION_OAUTH_CLIENT_ID`, `NOTION_OAUTH_CLIENT_SECRET`, `NOTION_REDIRECT_URI`, `TAVILY_API_KEY`, `APP_BASE_URL`, and optionally `RESEND_API_KEY` / `EMAIL_FROM`.
 5. In the Notion Developer Portal, register the exact production callback URL from step 3. Keep the integration's capabilities limited to the required read/insert/update content access.
 6. In GitHub → Actions, enable workflows if prompted. `Scheduled research jobs` runs every six hours and can also be started manually using **Run workflow**. It only processes users whose saved run time is due, or users who requested a manual run. GitHub scheduled runs can be delayed, so daily discovery and reminders are approximate rather than exact-to-the-minute.
 7. Open the Vercel URL, register a test account, save a profile, connect Notion, and run a manual discovery. Check `/healthz` and the GitHub Actions run logs.
@@ -116,7 +116,7 @@ This is a $0 hobby/portfolio deployment path. Vercel Hobby is intended for perso
 | `NOTION_OAUTH_CLIENT_ID` | Yes | Application owner's Notion OAuth client ID |
 | `NOTION_OAUTH_CLIENT_SECRET` | Yes | Application owner's Notion OAuth client secret |
 | `NOTION_REDIRECT_URI` | Yes | Exact callback URI configured in Notion |
-| `BRAVE_SEARCH_API_KEY` | Yes for discovery | Search provider key; queries may disclose broad research interests, degree level, current academic year, graduation year, intake and preferred countries. CGPA, citizenship, identity, account credentials and Notion tokens are never included. |
+| `TAVILY_API_KEY` | Yes for discovery | Search provider key; queries may disclose broad research interests, degree level, current academic year, graduation year, intake and preferred countries. CGPA, citizenship, identity, account credentials and Notion tokens are never included. |
 | `COOKIE_SECURE` | Yes in production | Must be `true` over HTTPS |
 | `ALLOWED_HOSTS` | Yes in production | Exact public hostname(s), comma-separated |
 | `NOTION_API_VERSION` | No | Pinned to `2026-03-11` by default; review before upgrading |
