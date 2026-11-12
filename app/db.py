@@ -53,15 +53,31 @@ SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False
 
 
 def init_db() -> None:
+    """Create/update the small schema safely across concurrent serverless cold starts.
+
+    Vercel can start several FastAPI instances at once. Calling metadata.create_all()
+    without a cross-process lock lets two instances both observe a missing table
+    and race to create its PostgreSQL composite type, producing pg_type duplicate
+    key errors. A transaction-scoped advisory lock serializes schema setup without
+    requiring a persistent database connection between function invocations.
+    """
     # Import models so SQLAlchemy registers all tables.
     from app import models  # noqa: F401
-    Base.metadata.create_all(bind=engine)
-    # Lightweight forward-compatible migration for databases created before
-    # exact semester tracking was introduced. Existing profiles remain valid.
-    inspector = inspect(engine)
-    profile_columns = {column["name"] for column in inspector.get_columns("user_profiles")}
-    opportunity_columns = {column["name"] for column in inspector.get_columns("user_opportunities")}
+
     with engine.begin() as connection:
+        if connection.dialect.name == "postgresql":
+            # Transaction-level lock works with Supabase's transaction pooler.
+            # All app versions use this fixed key to serialize startup migrations.
+            connection.execute(text("SELECT pg_advisory_xact_lock(734821930147::bigint)"))
+
+        Base.metadata.create_all(bind=connection)
+
+        inspector = inspect(connection)
+        profile_columns = {column["name"] for column in inspector.get_columns("user_profiles")}
+        opportunity_columns = {column["name"] for column in inspector.get_columns("user_opportunities")}
+
+        # Lightweight forward-compatible migration for databases created before
+        # exact semester and deadline-email tracking were introduced.
         profile_additions = {
             "current_semester": "INTEGER",
             "deadline_email_enabled": "BOOLEAN NOT NULL DEFAULT FALSE",
@@ -70,5 +86,9 @@ def init_db() -> None:
         for name, ddl in profile_additions.items():
             if name not in profile_columns:
                 connection.execute(text(f"ALTER TABLE user_profiles ADD COLUMN {name} {ddl}"))
+
         if "application_status" not in opportunity_columns:
-            connection.execute(text("ALTER TABLE user_opportunities ADD COLUMN application_status VARCHAR(40) NOT NULL DEFAULT 'Pending'"))
+            connection.execute(text(
+                "ALTER TABLE user_opportunities "
+                "ADD COLUMN application_status VARCHAR(40) NOT NULL DEFAULT 'Pending'"
+            ))
