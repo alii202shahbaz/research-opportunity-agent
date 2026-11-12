@@ -1,4 +1,7 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "regions": ["sin1"]
+  "framework": "fastapi",
+  "regions": [
+    "sin1"
+  ]
 }
