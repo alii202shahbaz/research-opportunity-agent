@@ -41,7 +41,7 @@ function setAuthMode(mode) {
   $("authPassword").autocomplete = mode === "login" ? "current-password" : "new-password";
   $("authError").textContent = "";
 }
-function parseCsv(value) { return value.split(",").map(x => x.trim()).filter(Boolean); }
+function parseCsv(value) { return value.split(/[,;\n]/).map(x => x.trim()).filter(Boolean); }
 function renderHourOptions() {
   const select = $("updateHour");
   for (let h = 0; h < 24; h++) {
@@ -85,6 +85,8 @@ function fillProfile(p) {
   $("timezone").value = configured ? (p.timezone_name || localTimezone) : localTimezone;
   $("updateHour").value = String(p.update_hour ?? 8);
   $("automation").checked = p.automation_enabled !== false;
+  $("deadlineEmailEnabled").checked = p.deadline_email_enabled === true;
+  $("deadlineEmails").value = (p.deadline_emails || []).join(", ");
   $("profileSaved").textContent = configured ? "Configured" : "Not configured";
   $("profileSaved").classList.toggle("ok", configured);
   if (p.last_run_summary) $("runSummary").textContent = `${p.last_run_status || "Last run"}: ${p.last_run_summary}`;
@@ -138,7 +140,21 @@ function renderOpportunities(items) {
     left.append(title, meta);
     const right = document.createElement("div");
     const link = document.createElement("a"); link.className = "link"; link.href = item.application_url; link.target = "_blank"; link.rel = "noopener noreferrer"; link.textContent = "Official page ↗";
-    right.append(link);
+    const statusLabel = document.createElement("label"); statusLabel.className = "status-select-label"; statusLabel.textContent = "Application status";
+    const statusSelect = document.createElement("select"); statusSelect.className = "status-select";
+    for (const status of ["Pending", "Waiting", "Done", "Deadline Passed", "Accepted", "Rejected"]) {
+      const option = document.createElement("option"); option.value = status; option.textContent = status; statusSelect.append(option);
+    }
+    statusSelect.value = item.application_status || "Pending";
+    statusSelect.addEventListener("change", async () => {
+      statusSelect.disabled = true;
+      try {
+        await api(`/api/opportunities/${encodeURIComponent(item.id)}/application-status`, { method: "PATCH", body: JSON.stringify({ status: statusSelect.value }) });
+        toast(`Application status updated: ${statusSelect.value}`);
+      } catch (err) { statusSelect.value = item.application_status || "Pending"; toast(err.message, true); }
+      finally { statusSelect.disabled = false; }
+    });
+    right.append(link, statusLabel, statusSelect);
     const details = document.createElement("div"); details.className = "details";
     const tags = [item.funding_type, item.deadline ? `Deadline: ${item.deadline}` : "Deadline unknown", item.verification_status, `Match ${Math.round(item.relevance_score*100)}%`];
     if (item.domains?.length) tags.push(...item.domains);
@@ -189,6 +205,7 @@ $("profileForm").addEventListener("submit", async (event) => {
     funding_preference: $("funding").value, intake_year: Number($("intakeYear").value),
     intake_season: $("intakeSeason").value, timezone_name: $("timezone").value,
     update_hour: Number($("updateHour").value), automation_enabled: $("automation").checked,
+    deadline_email_enabled: $("deadlineEmailEnabled").checked, deadline_emails: parseCsv($("deadlineEmails").value),
   };
   try {
     const data = await api("/api/profile", { method: "PUT", body: JSON.stringify(payload) });
