@@ -156,31 +156,20 @@ def scheduled_worker(hour: str, request: Request):
     logger.info("Hourly scheduler slot %s processed %s user(s)", hour, len(processed))
     return {"ok": True, "slot": hour, "processed": len(processed)}
 
-@app.get("/api/cron/worker", include_in_schema=False)
-def frequent_scheduled_worker(request: Request):
-    """Called by the Azure student-tier timer every five minutes."""
-    if not settings.cron_secret:
-        raise HTTPException(status_code=503, detail="Background scheduler is not configured")
-    supplied = request.headers.get("authorization", "")
-    if not hmac.compare_digest(supplied, f"Bearer {settings.cron_secret}"):
-        raise HTTPException(status_code=401, detail="Unauthorized")
-    from app.scheduler import claim_due_users, process_user
-    user_ids = claim_due_users(limit=1)
-    if not user_ids:
-        logger.info("Five-minute scheduler tick found no due jobs")
-        return {"ok": True, "processed": 0}
-    user_id = user_ids[0]
-    process_user(user_id)
-    logger.info("Five-minute scheduler processed user %s", user_id[:8])
-    return {"ok": True, "processed": 1}
-
-
 @app.get("/api/csrf")
 def csrf_token(request: Request, response: Response):
     existing = request.cookies.get(CSRF_COOKIE)
     if existing:
         return {"csrf_token": existing}
     return {"csrf_token": set_csrf_cookie(response)}
+
+
+def _utc_iso(value: datetime | None) -> str | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc).isoformat()
 
 
 def _profile_payload(profile: UserProfile | None) -> dict | None:
@@ -208,7 +197,9 @@ def _profile_payload(profile: UserProfile | None) -> dict | None:
         "last_run_at": profile.last_run_at.isoformat() if profile.last_run_at else None,
         "last_run_status": profile.last_run_status,
         "last_run_summary": profile.last_run_summary,
-        "next_run_at": profile.next_run_at.isoformat() if profile.next_run_at else None,
+        "next_run_at": _utc_iso(profile.next_run_at),
+        "manual_cooldown_until": _utc_iso(profile.manual_cooldown_until),
+        "lease_until": _utc_iso(profile.lease_until),
     }
 
 
@@ -399,29 +390,64 @@ def run_now(
     context=Depends(require_auth_csrf),
     db: Session = Depends(get_db),
 ):
-    enforce_rate_limit(request, "run_now", 4, 3600)
     user, _session = context
     profile = db.scalar(select(UserProfile).where(UserProfile.user_id == user.id).with_for_update())
     if not profile or not profile.interests_json or profile.interests_json == "[]":
-        raise HTTPException(status_code=409, detail="Complete your academic profile before starting discovery")
+        raise HTTPException(status_code=409, detail="Complete your profile and add at least one research interest before starting discovery")
+
     now = datetime.now(timezone.utc)
+    cooldown_until = profile.manual_cooldown_until
+    if cooldown_until and cooldown_until.tzinfo is None:
+        cooldown_until = cooldown_until.replace(tzinfo=timezone.utc)
+    if cooldown_until and cooldown_until > now:
+        remaining = max(1, int((cooldown_until - now).total_seconds() + 0.999))
+        minutes, seconds = divmod(remaining, 60)
+        wait_text = f"{minutes}m {seconds:02d}s" if minutes else f"{seconds}s"
+        raise HTTPException(
+            status_code=429,
+            detail=f"Discover Now is on cooldown. You can start another scan in {wait_text}.",
+            headers={"Retry-After": str(remaining)},
+        )
+
     lease_until = profile.lease_until
     if lease_until and lease_until.tzinfo is None:
         lease_until = lease_until.replace(tzinfo=timezone.utc)
     if lease_until and lease_until > now:
-        raise HTTPException(status_code=409, detail="A discovery job is already running for this account")
+        remaining = max(1, int((lease_until - now).total_seconds() + 0.999))
+        minutes, seconds = divmod(remaining, 60)
+        wait_text = f"{minutes}m {seconds:02d}s" if minutes else f"{seconds}s"
+        raise HTTPException(
+            status_code=409,
+            detail=f"Discovery is already running. Check again in {wait_text}.",
+            headers={"Retry-After": str(remaining)},
+        )
+
+    # Manual discovery is executed immediately inside this request; it is not queued
+    # for a future Vercel Cron invocation. Commit a cooldown and lease before running
+    # so a second tab/device cannot start a duplicate scan.
     profile.manual_run_requested = True
-    profile.lease_until = now + timedelta(minutes=6)
+    profile.manual_cooldown_until = now + timedelta(minutes=15)
+    profile.lease_until = now + timedelta(minutes=max(settings.job_lease_minutes, 10))
+    profile.last_run_status = "running"
+    profile.last_run_summary = "Manual discovery started. Searching for opportunities and syncing Notion."
     db.commit()
+
     from app.scheduler import process_user
     process_user(user.id)
+
     db.expire_all()
     refreshed = db.get(UserProfile, user.id)
     status_value = refreshed.last_run_status if refreshed else "unknown"
     summary = refreshed.last_run_summary if refreshed else "No run summary was recorded."
+    cooldown = _utc_iso(refreshed.manual_cooldown_until) if refreshed else None
     if status_value == "error":
         raise HTTPException(status_code=502, detail=summary)
-    return {"ok": True, "status": status_value, "message": f"Discovery finished: {summary}"}
+    return {
+        "ok": True,
+        "status": status_value,
+        "manual_cooldown_until": cooldown,
+        "message": f"Discovery finished: {summary}",
+    }
 
 
 @app.post("/api/email/test")
