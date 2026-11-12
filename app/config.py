@@ -29,12 +29,18 @@ class Settings(BaseSettings):
 
     tavily_api_key: str = ""
     resend_api_key: str = ""
+    email_provider: str = "auto"
     email_from: str = ""
+    gmail_user: str = ""
+    gmail_app_password: str = ""
+    gmail_smtp_host: str = "smtp.gmail.com"
+    gmail_smtp_port: int = 465
+    cron_secret: str = ""
     search_results_per_query: int = 8
     max_search_queries_per_run: int = 5
     max_pages_per_run: int = 30
     worker_poll_seconds: int = 30
-    job_lease_minutes: int = 60
+    job_lease_minutes: int = 10
 
     session_idle_minutes: int = 10
     cookie_secure: bool = False
@@ -80,6 +86,26 @@ class Settings(BaseSettings):
         return configured
 
     @property
+    def active_email_provider(self) -> str:
+        provider = self.email_provider.strip().lower()
+        if provider in {"smtp", "resend", "disabled"}:
+            return provider
+        if self.resend_api_key and self.email_from:
+            return "resend"
+        if self.gmail_user and self.gmail_app_password and self.email_from:
+            return "smtp"
+        return "disabled"
+
+    @property
+    def email_configured(self) -> bool:
+        provider = self.active_email_provider
+        if provider == "smtp":
+            return bool(self.email_from and self.gmail_user and self.gmail_app_password)
+        if provider == "resend":
+            return bool(self.email_from and self.resend_api_key)
+        return False
+
+    @property
     def is_production(self) -> bool:
         return self.app_env.lower() == "production"
 
@@ -96,8 +122,8 @@ class Settings(BaseSettings):
                 raise ValueError("Notion OAuth credentials are required in production")
             if not self.tavily_api_key:
                 raise ValueError("TAVILY_API_KEY is required to enable discovery")
-            if bool(self.resend_api_key) != bool(self.email_from):
-                raise ValueError("Configure both RESEND_API_KEY and EMAIL_FROM, or leave both empty")
+            if self.email_provider.strip().lower() not in {"auto", "smtp", "resend", "disabled"}:
+                raise ValueError("EMAIL_PROVIDER must be auto, smtp, resend or disabled")
             if not self.cookie_secure:
                 raise ValueError("COOKIE_SECURE must be true in production")
             if not self.app_base_url.startswith("https://"):

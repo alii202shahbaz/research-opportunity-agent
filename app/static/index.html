@@ -73,14 +73,19 @@
             <fieldset class="form-section wide">
               <legend>Automation schedule</legend>
               <div><label for="timezone">Timezone</label><input id="timezone" maxlength="80" placeholder="e.g. Asia/Karachi" required><span class="hint">Use your local IANA timezone. Pakistan: Asia/Karachi.</span></div>
-              <div><label for="updateHour">Daily update time</label><select id="updateHour"></select><span class="hint">The worker checks every few minutes. Actual delivery can be slightly later than this time.</span></div>
+              <div><label for="updateHour">Daily update time</label><select id="updateHour"></select><span class="hint">The free scheduler checks each UTC hour. On Vercel Hobby, it can start at any point within the selected local hour, not necessarily at :00.</span></div>
               <div class="wide check-row"><input id="automation" type="checkbox" checked><label for="automation">Enable daily automatic discovery and Notion updates</label></div>
               <p id="scheduleStatus" class="hint wide">Next run: save your profile to schedule the first update.</p>
             </fieldset>
             <fieldset class="form-section wide">
               <legend>Email notifications</legend>
               <div class="wide check-row"><input id="deadlineEmailEnabled" type="checkbox"><label for="deadlineEmailEnabled">Email me a daily deadline digest</label></div>
-              <div class="wide"><label for="deadlineEmails">Recipient email addresses</label><input id="deadlineEmails" type="text" maxlength="2000" placeholder="you@example.com, another@example.com"><span class="hint">These are the recipient addresses. The sender address is configured by the app administrator. Emails are sent only when pending opportunities have a deadline tomorrow. Email delivery is currently not configured.</span></div>
+              <div class="wide"><label for="deadlineEmails">Recipient email addresses</label><input id="deadlineEmails" type="text" maxlength="2000" placeholder="you@example.com, another@example.com"><span class="hint">These are the recipients. The sender is configured separately as oppfindagent@gmail.com. A daily digest is sent only when pending opportunities have a deadline tomorrow.</span></div>
+              <div class="wide email-config">
+                <p id="emailSenderStatus" class="hint" role="status">Checking email sender configuration…</p>
+                <button id="testEmailBtn" type="button" class="button button-secondary" disabled>Send a test email to my account address</button>
+                <span id="emailTestStatus" class="muted small" role="status"></span>
+              </div>
             </fieldset>
             <div class="wide form-actions"><button class="button button-primary" type="submit">Save profile</button><span id="profileMessage" class="muted small"></span></div>
           </form>

@@ -138,6 +138,17 @@ function fillProfile(p) {
     $("scheduleStatus").textContent = p.automation_enabled ? "Next run is being scheduled…" : "Automatic discovery is off.";
   }
 }
+function renderEmail(email) {
+  const status = $("emailSenderStatus");
+  const button = $("testEmailBtn");
+  if (!email) {
+    status.textContent = "Email sender status is unavailable.";
+    button.disabled = true;
+    return;
+  }
+  status.textContent = `Sender: ${email.sender || "not configured"} · ${email.message || "Email delivery is not ready."}`;
+  button.disabled = !email.configured;
+}
 function renderNotion(n) {
   if (!n || !n.connected) {
     $("notionDisconnected").classList.remove("hidden");
@@ -165,6 +176,7 @@ async function loadDashboard() {
   $("userEmail").textContent = me.email;
   fillProfile(me.profile);
   renderNotion(me.notion);
+  renderEmail(me.email_delivery);
   showDashboard();
   try {
     await loadOpportunities();
@@ -299,9 +311,35 @@ $("disconnectNotionBtn").addEventListener("click", async () => {
   try { const data = await api("/api/notion/disconnect", { method: "POST", body: "{}" }); await refreshMe(); toast(data.warning || "Notion disconnected."); }
   catch (err) { toast(err.message, true); }
 });
+$("testEmailBtn").addEventListener("click", async () => {
+  const button = $("testEmailBtn");
+  button.disabled = true;
+  $("emailTestStatus").textContent = "Sending test…";
+  try {
+    const data = await api("/api/email/test", { method: "POST", body: "{}" });
+    $("emailTestStatus").textContent = data.message;
+    toast("Test email sent.");
+  } catch (err) {
+    $("emailTestStatus").textContent = err.message;
+    toast(err.message, true);
+  } finally {
+    button.disabled = false;
+  }
+});
 $("runNowBtn").addEventListener("click", async () => {
-  try { const data = await api("/api/run-now", { method: "POST", body: "{}" }); toast(data.message); }
-  catch (err) { toast(err.message, true); }
+  const button = $("runNowBtn");
+  button.disabled = true;
+  button.textContent = "Running discovery…";
+  try {
+    const data = await api("/api/run-now", { method: "POST", body: "{}" });
+    toast(data.message);
+    await refreshMe();
+  } catch (err) {
+    toast(err.message, true);
+  } finally {
+    button.disabled = false;
+    button.textContent = "Run discovery now";
+  }
 });
 $("deleteAccountBtn").addEventListener("click", async () => {
   if (!window.confirm("Permanently delete your account, academic profile, stored Notion credentials and saved opportunities? This cannot be undone.")) return;

@@ -22,7 +22,12 @@ jobs:
       NOTION_REDIRECT_URI: ${{ secrets.NOTION_REDIRECT_URI }}
       TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
       RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
-      EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
+      EMAIL_PROVIDER: smtp
+      EMAIL_FROM: Research Opportunity Agent <oppfindagent@gmail.com>
+      GMAIL_USER: ${{ secrets.GMAIL_USER }}
+      GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+      GMAIL_SMTP_HOST: smtp.gmail.com
+      GMAIL_SMTP_PORT: "465"
       APP_BASE_URL: ${{ secrets.APP_BASE_URL }}
       COOKIE_SECURE: "true"
       LOG_LEVEL: INFO

@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import hmac
 import json
 import logging
 import re
 import threading
 import time
 from collections import defaultdict, deque
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import quote, urlparse
 
@@ -20,7 +21,7 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.db import SessionLocal, init_db
-from app.emailer import set_application_status
+from app.emailer import email_delivery_status, send_test_email, set_application_status
 from app.models import NotionConnection, OAuthState, User, UserOpportunity, UserProfile, UserSession
 from app.notion import (
     NotionAPIError,
@@ -134,6 +135,28 @@ def healthz():
     return {"status": "ok"}
 
 
+@app.get("/api/cron/{hour}", include_in_schema=False)
+def scheduled_worker(hour: str, request: Request):
+    # Twenty-four daily Vercel Hobby cron entries call this route once in each UTC hour.
+    if not re.fullmatch(r"(?:[01]\\d|2[0-3])", hour):
+        raise HTTPException(status_code=404, detail="Unknown scheduler slot")
+    if not settings.cron_secret:
+        raise HTTPException(status_code=503, detail="Background scheduler is not configured")
+    supplied = request.headers.get("authorization", "")
+    if not hmac.compare_digest(supplied, f"Bearer {settings.cron_secret}"):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    from app.scheduler import claim_due_users, process_user
+    processed = []
+    for _ in range(3):
+        user_ids = claim_due_users(limit=1)
+        if not user_ids:
+            break
+        process_user(user_ids[0])
+        processed.append(user_ids[0][:8])
+    logger.info("Hourly scheduler slot %s processed %s user(s)", hour, len(processed))
+    return {"ok": True, "slot": hour, "processed": len(processed)}
+
+
 @app.get("/api/csrf")
 def csrf_token(request: Request, response: Response):
     existing = request.cookies.get(CSRF_COOKIE)
@@ -239,6 +262,7 @@ def me(context=Depends(get_current_context)):
         return {
             "email": user.email,
             "profile": _profile_payload(profile),
+            "email_delivery": email_delivery_status(),
             "notion": None if not notion else {
                 "connected": True,
                 "workspace_name": notion.workspace_name,
@@ -359,11 +383,42 @@ def run_now(
 ):
     enforce_rate_limit(request, "run_now", 4, 3600)
     user, _session = context
-    profile = db.get(UserProfile, user.id)
+    profile = db.scalar(select(UserProfile).where(UserProfile.user_id == user.id).with_for_update())
     if not profile or not profile.interests_json or profile.interests_json == "[]":
         raise HTTPException(status_code=409, detail="Complete your academic profile before starting discovery")
-    enqueue_immediate_run(db, profile)
-    return {"ok": True, "message": "Discovery queued. The worker will process it shortly."}
+    now = datetime.now(timezone.utc)
+    lease_until = profile.lease_until
+    if lease_until and lease_until.tzinfo is None:
+        lease_until = lease_until.replace(tzinfo=timezone.utc)
+    if lease_until and lease_until > now:
+        raise HTTPException(status_code=409, detail="A discovery job is already running for this account")
+    profile.manual_run_requested = True
+    profile.lease_until = now + timedelta(minutes=6)
+    db.commit()
+    from app.scheduler import process_user
+    process_user(user.id)
+    db.expire_all()
+    refreshed = db.get(UserProfile, user.id)
+    status_value = refreshed.last_run_status if refreshed else "unknown"
+    summary = refreshed.last_run_summary if refreshed else "No run summary was recorded."
+    if status_value == "error":
+        raise HTTPException(status_code=502, detail=summary)
+    return {"ok": True, "status": status_value, "message": f"Discovery finished: {summary}"}
+
+
+@app.post("/api/email/test")
+def email_test(
+    request: Request,
+    context=Depends(require_auth_csrf),
+):
+    enforce_rate_limit(request, "email_test", 2, 3600)
+    user, _session = context
+    result = send_test_email(user.email)
+    if result == "provider_not_configured":
+        raise HTTPException(status_code=503, detail="Email delivery is not configured yet. Add the Gmail App Password in Vercel settings.")
+    if result != "sent":
+        raise HTTPException(status_code=502, detail="The test email could not be sent. Check the Gmail sender setup.")
+    return {"ok": True, "message": f"Test email sent to {user.email}"}
 
 
 @app.get("/api/opportunities", response_model=list[OpportunityOut])

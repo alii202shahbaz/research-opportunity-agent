@@ -4,6 +4,10 @@ import html
 import json
 import logging
 import hashlib
+import smtplib
+import ssl
+from email.message import EmailMessage
+from email.utils import formatdate, make_msgid, parseaddr
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -18,6 +22,99 @@ from app.models import EmailDigestLog, User, UserOpportunity, UserProfile
 settings = get_settings()
 logger = logging.getLogger(__name__)
 RESEND_ENDPOINT = "https://api.resend.com/emails"
+
+
+def email_delivery_status() -> dict[str, str | bool]:
+    provider = settings.active_email_provider
+    sender = parseaddr(settings.email_from)[1] if settings.email_from else ""
+    provider_label = "Gmail SMTP" if provider == "smtp" else "Resend" if provider == "resend" else "Not configured"
+    if settings.email_configured:
+        message = f"Ready to send through {provider_label}."
+    elif sender and provider == "smtp":
+        message = "Add the Gmail App Password to the deployment's GMAIL_APP_PASSWORD secret to enable delivery."
+    elif sender and provider == "resend":
+        message = "Add the Resend API key to enable delivery."
+    else:
+        message = "Email sender is not configured."
+    return {
+        "configured": settings.email_configured,
+        "provider": provider_label,
+        "sender": sender,
+        "message": message,
+    }
+
+
+def _deliver_email(payload: dict, idempotency_key: str = "") -> tuple[str, str]:
+    if not settings.email_configured:
+        return "provider_not_configured", ""
+
+    provider = settings.active_email_provider
+    if provider == "smtp":
+        recipients = list(dict.fromkeys(payload.get("to", []) + payload.get("bcc", [])))
+        message = EmailMessage()
+        message["From"] = payload["from"]
+        message["To"] = ", ".join(payload.get("to", []))
+        message["Subject"] = payload["subject"]
+        message["Date"] = formatdate(localtime=False)
+        if idempotency_key:
+            stable_id = hashlib.sha256(idempotency_key.encode("utf-8")).hexdigest()[:32]
+            message["Message-ID"] = f"<{stable_id}@gmail.com>"
+        else:
+            message["Message-ID"] = make_msgid(domain="gmail.com")
+        message.set_content(payload.get("text", ""))
+        message.add_alternative(payload.get("html", ""), subtype="html")
+        with smtplib.SMTP_SSL(
+            settings.gmail_smtp_host,
+            settings.gmail_smtp_port,
+            context=ssl.create_default_context(),
+            timeout=20,
+        ) as client:
+            client.login(settings.gmail_user, settings.gmail_app_password.replace(" ", ""))
+            refused = client.send_message(message, from_addr=settings.gmail_user, to_addrs=recipients)
+        if refused:
+            raise smtplib.SMTPRecipientsRefused(refused)
+        return "sent", "gmail-smtp"
+
+    if provider == "resend":
+        headers = {
+            "Authorization": f"Bearer {settings.resend_api_key}",
+            "Content-Type": "application/json",
+        }
+        if idempotency_key:
+            headers["Idempotency-Key"] = idempotency_key
+        with httpx.Client(timeout=httpx.Timeout(20.0, connect=8.0), follow_redirects=False) as client:
+            response = client.post(RESEND_ENDPOINT, headers=headers, json=payload)
+        if response.status_code >= 400:
+            raise RuntimeError(f"email_provider_http_{response.status_code}")
+        try:
+            provider_id = str(response.json().get("id", ""))[:120]
+        except (ValueError, AttributeError):
+            provider_id = ""
+        return "sent", provider_id
+
+    return "provider_not_configured", ""
+
+
+def send_test_email(recipient: str) -> str:
+    payload = {
+        "from": settings.email_from,
+        "to": [recipient],
+        "subject": "Research Opportunity Agent — test email",
+        "text": "Your Research Opportunity Agent email delivery is working.",
+        "html": (
+            '<div style="font-family:Arial,sans-serif;color:#172235">'
+            '<h2>Research Opportunity Agent</h2>'
+            '<p>Your email sender is configured and working.</p>'
+            '</div>'
+        ),
+    }
+    try:
+        status, _provider_id = _deliver_email(payload)
+        return status
+    except (httpx.HTTPError, smtplib.SMTPException, OSError, ValueError, RuntimeError) as exc:
+        logger.warning("Test email failed (%s)", type(exc).__name__)
+        return "failed"
+
 
 
 def tomorrow_deadlines(db: Session, user_id: str, tomorrow: date) -> list[UserOpportunity]:
@@ -77,7 +174,7 @@ def send_deadline_digest(db: Session, profile: UserProfile, *, now: datetime | N
     recipients = json.loads(profile.deadline_emails_json or "[]")
     if not recipients:
         return "no_recipients"
-    if not settings.resend_api_key or not settings.email_from:
+    if not settings.email_configured:
         return "provider_not_configured"
 
     zone = ZoneInfo(profile.timezone_name or "UTC")
@@ -135,32 +232,21 @@ def send_deadline_digest(db: Session, profile: UserProfile, *, now: datetime | N
         payload["bcc"] = recipients[1:]
     idempotency_key = f"deadline-digest/{profile.user_id}/{local_date.isoformat()}"
     try:
-        with httpx.Client(timeout=httpx.Timeout(20.0, connect=8.0), follow_redirects=False) as client:
-            response = client.post(
-                RESEND_ENDPOINT,
-                headers={
-                    "Authorization": f"Bearer {settings.resend_api_key}",
-                    "Content-Type": "application/json",
-                    "Idempotency-Key": idempotency_key,
-                },
-                json=payload,
-            )
-        if response.status_code >= 400:
+        delivery_status, provider_id = _deliver_email(payload, idempotency_key)
+        if delivery_status != "sent":
             log.status = "failed"
-            log.error_code = f"http_{response.status_code}"
+            log.error_code = delivery_status[:80]
             db.commit()
-            logger.warning("Deadline email failed for user %s (HTTP %s)", profile.user_id[:8], response.status_code)
-            return "failed"
-        data = response.json()
+            return delivery_status
         log.status = "sent"
-        log.provider_message_id = str(data.get("id", ""))[:120]
+        log.provider_message_id = provider_id
         log.sent_at = datetime.now(timezone.utc)
         log.error_code = ""
         db.commit()
         return "sent"
-    except (httpx.HTTPError, ValueError) as exc:
+    except (httpx.HTTPError, smtplib.SMTPException, OSError, ValueError, RuntimeError) as exc:
         log.status = "failed"
-        log.error_code = type(exc).__name__[:80]
+        log.error_code = str(exc)[:80]
         db.commit()
         logger.warning("Deadline email transport failed for user %s (%s)", profile.user_id[:8], type(exc).__name__)
         return "failed"
@@ -207,7 +293,7 @@ def send_recovery_digest(
     if not profile_snapshot.get("deadline_email_enabled"):
         return "disabled"
     recipients = profile_snapshot.get("deadline_emails") or []
-    if not recipients or not settings.resend_api_key or not settings.email_from:
+    if not recipients or not settings.email_configured:
         return "not_configured"
 
     clean_rows = []
@@ -277,20 +363,8 @@ def send_recovery_digest(
     if len(recipients) > 1:
         payload["bcc"] = recipients[1:]
     try:
-        with httpx.Client(timeout=httpx.Timeout(20.0, connect=8.0), follow_redirects=False) as client:
-            response = client.post(
-                RESEND_ENDPOINT,
-                headers={
-                    "Authorization": f"Bearer {settings.resend_api_key}",
-                    "Content-Type": "application/json",
-                    "Idempotency-Key": idempotency_key,
-                },
-                json=payload,
-            )
-        if response.status_code >= 400:
-            logger.warning("Recovery email failed (HTTP %s)", response.status_code)
-            return "failed"
-        return "sent"
-    except (httpx.HTTPError, ValueError) as exc:
+        delivery_status, _provider_id = _deliver_email(payload, idempotency_key)
+        return "sent" if delivery_status == "sent" else delivery_status
+    except (httpx.HTTPError, smtplib.SMTPException, OSError, ValueError, RuntimeError) as exc:
         logger.warning("Recovery email transport failed (%s)", type(exc).__name__)
         return "failed"
