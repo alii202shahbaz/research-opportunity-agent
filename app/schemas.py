@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date
+import re
 from typing import Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -39,6 +40,33 @@ class ProfileIn(BaseModel):
     timezone_name: str = Field(default="UTC", max_length=80)
     update_hour: int = Field(default=8, ge=0, le=23)
     automation_enabled: bool = True
+    deadline_email_enabled: bool = False
+    deadline_emails: list[str] = Field(default_factory=list, max_length=10)
+
+    @field_validator("deadline_emails")
+    @classmethod
+    def validate_deadline_emails(cls, values: list[str]) -> list[str]:
+        cleaned = []
+        seen = set()
+        pattern = re.compile(r"^[A-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?(?:\.[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?)+$", re.I)
+        for item in values:
+            email = item.strip().lower()
+            if not email:
+                continue
+            if not pattern.fullmatch(email):
+                raise ValueError(f"Invalid reminder email address: {email}")
+            if email not in seen:
+                cleaned.append(email)
+                seen.add(email)
+        if len(cleaned) > 10:
+            raise ValueError("You can add at most 10 reminder recipients")
+        return cleaned
+
+    @model_validator(mode="after")
+    def email_reminders_need_recipients(self) -> "ProfileIn":
+        if self.deadline_email_enabled and not self.deadline_emails:
+            raise ValueError("Add at least one reminder email address or turn reminders off")
+        return self
 
     @field_validator("interests", "preferred_countries")
     @classmethod
@@ -97,5 +125,6 @@ class OpportunityOut(BaseModel):
     intake_year: int
     intake_confirmed: bool
     opportunity_status: str
+    application_status: str
     first_seen_at: str
     last_verified_at: str
