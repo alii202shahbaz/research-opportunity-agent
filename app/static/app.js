@@ -7,6 +7,12 @@ const IDLE_TIMEOUT_MS = 10 * 60 * 1000;
 let lastActivityAt = Date.now();
 let sessionWatchTimer = null;
 let lastSessionPingAt = Date.now();
+const MANUAL_RUN_COOLDOWN_MS = 15 * 60 * 1000;
+let manualCooldownUntil = 0;
+let manualLeaseUntil = 0;
+let manualRequestInFlight = false;
+let runStatusPollAt = 0;
+let runUiTimer = null;
 
 function toast(message, error = false) {
   const el = $("toast");
@@ -131,12 +137,78 @@ function fillProfile(p) {
   $("profileSaved").textContent = configured ? "Configured" : "Not configured";
   $("profileSaved").classList.toggle("ok", configured);
   if (p.last_run_summary) $("runSummary").textContent = `${p.last_run_status || "Last run"}: ${p.last_run_summary}`;
+  syncManualRunState(p);
   if (p.next_run_at) {
     const nextRun = new Date(p.next_run_at);
     $("scheduleStatus").textContent = `Next scheduled run: ${nextRun.toLocaleString(undefined, { timeZone: p.timezone_name || "UTC", dateStyle: "medium", timeStyle: "short" })} (${p.timezone_name || "UTC"})`;
   } else {
     $("scheduleStatus").textContent = p.automation_enabled ? "Next run is being scheduled…" : "Automatic discovery is off.";
   }
+}
+function dateValueMs(value) {
+  if (!value) return 0;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+function formatRemaining(totalSeconds) {
+  const seconds = Math.max(0, Math.ceil(totalSeconds));
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const remainder = seconds % 60;
+  if (hours) return `${hours}h ${String(minutes).padStart(2, "0")}m ${String(remainder).padStart(2, "0")}s`;
+  return `${minutes}m ${String(remainder).padStart(2, "0")}s`;
+}
+function syncManualRunState(profile) {
+  manualCooldownUntil = dateValueMs(profile?.manual_cooldown_until);
+  manualLeaseUntil = dateValueMs(profile?.lease_until);
+  updateManualRunUi();
+}
+function updateManualRunUi() {
+  const button = $("runNowBtn");
+  const status = $("runNowStatus");
+  if (!button || !status) return;
+  const now = Date.now();
+  const leaseSeconds = Math.max(0, (manualLeaseUntil - now) / 1000);
+  const cooldownSeconds = Math.max(0, (manualCooldownUntil - now) / 1000);
+
+  if (manualRequestInFlight) {
+    button.disabled = true;
+    button.textContent = "Discovering…";
+    status.textContent = "Discovery is running now. Searching for opportunities and syncing Notion.";
+    return;
+  }
+  if (leaseSeconds > 0) {
+    button.disabled = true;
+    button.textContent = `Discovery running · ${formatRemaining(leaseSeconds)}`;
+    status.textContent = "A discovery job is already running. This page checks its status automatically.";
+    return;
+  }
+  if (cooldownSeconds > 0) {
+    button.disabled = true;
+    button.textContent = `Discover again in ${formatRemaining(cooldownSeconds)}`;
+    status.textContent = `Manual discovery cooldown · ${formatRemaining(cooldownSeconds)} remaining.`;
+    return;
+  }
+  button.disabled = false;
+  button.textContent = "Discover Now";
+  status.textContent = "Ready. Clicking Discover Now starts a scan immediately.";
+}
+async function pollManualRunState() {
+  if (manualRequestInFlight || manualLeaseUntil <= Date.now()) return;
+  const now = Date.now();
+  if (now - runStatusPollAt < 5000) return;
+  runStatusPollAt = now;
+  try {
+    const me = await api("/api/me");
+    syncManualRunState(me.profile);
+  } catch (_) {}
+}
+function startManualRunUiTimer() {
+  if (runUiTimer) window.clearInterval(runUiTimer);
+  runUiTimer = window.setInterval(() => {
+    updateManualRunUi();
+    pollManualRunState();
+  }, 1000);
 }
 function renderEmail(email) {
   const status = $("emailSenderStatus");
@@ -327,18 +399,23 @@ $("testEmailBtn").addEventListener("click", async () => {
   }
 });
 $("runNowBtn").addEventListener("click", async () => {
-  const button = $("runNowBtn");
-  button.disabled = true;
-  button.textContent = "Running discovery…";
+  if (manualRequestInFlight || $("runNowBtn").disabled) return;
+  manualRequestInFlight = true;
+  updateManualRunUi();
   try {
     const data = await api("/api/run-now", { method: "POST", body: "{}" });
-    toast(data.message);
+    if (data.manual_cooldown_until) manualCooldownUntil = dateValueMs(data.manual_cooldown_until);
+    toast(data.message || "Discovery completed.");
     await refreshMe();
   } catch (err) {
     toast(err.message, true);
+    try {
+      const me = await api("/api/me");
+      syncManualRunState(me.profile);
+    } catch (_) {}
   } finally {
-    button.disabled = false;
-    button.textContent = "Run discovery now";
+    manualRequestInFlight = false;
+    updateManualRunUi();
   }
 });
 $("deleteAccountBtn").addEventListener("click", async () => {
@@ -349,6 +426,7 @@ $("deleteAccountBtn").addEventListener("click", async () => {
 
 (async function boot() {
   renderHourOptions();
+  startManualRunUiTimer();
   $("timezone").value = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
   try { await initCsrf(); await loadDashboard(); startSessionWatch(); }
   catch (_) { showAuth(); stopSessionWatch(); }
