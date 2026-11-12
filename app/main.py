@@ -458,7 +458,7 @@ def email_test(
     user, _session = context
     result = send_test_email(user.email)
     if result == "provider_not_configured":
-        raise HTTPException(status_code=503, detail="Email delivery is not configured yet. Add the Gmail App Password in Vercel settings.")
+        raise HTTPException(status_code=503, detail="Email delivery is unavailable because the sender credentials are incomplete.")
     if result != "sent":
         raise HTTPException(status_code=502, detail="The test email could not be sent. Check the Gmail sender setup.")
     return {"ok": True, "message": f"Test email sent to {user.email}"}
