@@ -101,10 +101,12 @@ def process_user(user_id: str) -> None:
             profile.next_run_at.replace(tzinfo=timezone.utc) if profile.next_run_at.tzinfo is None else profile.next_run_at
         ) <= now)
         manual_requested = profile.manual_run_requested
+        notion_prepare_error = False
         try:
             notion_context = prepare_notion_sync(db, user_id)
         except NotionAPIError as exc:
-            logger.warning("Could not prepare Notion recovery sync for user %s (%s)", user_id[:8], str(exc))
+            notion_prepare_error = True
+            logger.warning("Could not prepare Notion sync for user %s (%s)", user_id[:8], str(exc))
 
         candidates = discover_for_profile(profile) if (profile.automation_enabled or manual_requested) else []
         local_today = now.astimezone(ZoneInfo(profile.timezone_name or "UTC")).date()
@@ -155,8 +157,8 @@ def process_user(user_id: str) -> None:
         expired_count = refresh_application_statuses(db, user_id, local_today)
         notion = db.get(NotionConnection, user_id)
         synced = 0
-        sync_errors = notion_direct_errors
-        if notion and notion.data_source_id:
+        sync_errors = notion_direct_errors + (1 if notion_prepare_error else 0)
+        if notion and notion.data_source_id and not notion_prepare_error:
             rows = db.scalars(
                 select(UserOpportunity).where(UserOpportunity.user_id == user_id)
                 .order_by(UserOpportunity.notion_page_id.is_(None).desc(),
