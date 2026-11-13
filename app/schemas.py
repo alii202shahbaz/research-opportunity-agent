@@ -121,6 +121,7 @@ class OpportunityOut(BaseModel):
     application_url: str
     official_source_url: str
     eligibility: str
+    eligibility_details: dict = Field(default_factory=dict)
     verification_status: str
     relevance_score: float
     intake_year: int
