@@ -15,12 +15,12 @@ from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
-from app.db import SessionLocal, init_db
+from app.db import SessionLocal, engine, init_db
 from app.emailer import email_delivery_status, send_test_email, set_application_status
 from app.discovery import canonicalize_url
 from app.models import NotionConnection, OAuthState, User, UserOpportunity, UserProfile, UserSession
@@ -133,12 +133,30 @@ def home():
 
 @app.get("/healthz", include_in_schema=False)
 def healthz():
-    return {"status": "ok"}
+    database_status = "ok"
+    try:
+        with engine.connect() as connection:
+            connection.execute(text("SELECT 1"))
+    except Exception as exc:
+        database_status = "error"
+        logger.error("Health check database probe failed (%s)", type(exc).__name__)
+    email_status = email_delivery_status()
+    status_value = "ok" if database_status == "ok" else "degraded"
+    return {
+        "status": status_value,
+        "database": database_status,
+        "scheduler_secret_configured": bool(settings.cron_secret),
+        "email": {
+            "configured": bool(email_status.get("configured")),
+            "provider": email_status.get("provider", "Not configured"),
+            "message": email_status.get("message", ""),
+        },
+    }
 
 
 @app.get("/api/cron/worker", include_in_schema=False)
 def scheduled_worker(request: Request):
-    """Vercel Schedules invokes this protected endpoint every 15 minutes."""
+    """Vercel Schedules invokes this protected daily batch worker."""
     if not settings.cron_secret:
         raise HTTPException(status_code=503, detail="Background scheduler is not configured")
     supplied = request.headers.get("authorization", "")
@@ -146,14 +164,26 @@ def scheduled_worker(request: Request):
         raise HTTPException(status_code=401, detail="Unauthorized")
 
     from app.scheduler import claim_due_users, process_user
-    user_ids = claim_due_users(limit=1)
-    if not user_ids:
-        return {"ok": True, "processed": 0}
+    started = time.monotonic()
+    processed = 0
+    # The Hobby function limit is shorter than the Pro limit. Claim one user
+    # at a time so users not processed in this invocation are never leased.
+    # Leave a safety margin before the configured 300-second function timeout.
+    while time.monotonic() - started < 240:
+        user_ids = claim_due_users(limit=1)
+        if not user_ids:
+            break
+        user_id = user_ids[0]
+        process_user(user_id)
+        processed += 1
+        logger.info("Scheduled worker processed user %s (%s this invocation)", user_id[:8], processed)
 
-    user_id = user_ids[0]
-    process_user(user_id)
-    logger.info("Vercel Schedules worker processed user %s", user_id[:8])
-    return {"ok": True, "processed": 1}
+    return {
+        "ok": True,
+        "processed": processed,
+        "duration_seconds": round(time.monotonic() - started, 1),
+        "more_due_users_may_remain": processed > 0 and time.monotonic() - started >= 240,
+    }
 
 @app.get("/api/csrf")
 def csrf_token(request: Request, response: Response):
@@ -459,9 +489,14 @@ def email_test(
     user, _session = context
     result = send_test_email(user.email)
     if result == "provider_not_configured":
-        raise HTTPException(status_code=503, detail="Email delivery is unavailable because the sender credentials are incomplete.")
+        raise HTTPException(status_code=503, detail="Email delivery is not configured. Add the Gmail App Password to the production environment variables.")
+    error_messages = {
+        "authentication_failed": "Gmail rejected the SMTP login. Check that GMAIL_USER is the correct account and GMAIL_APP_PASSWORD is a current Google App Password (not your normal Google password).",
+        "recipient_rejected": "Gmail rejected the recipient address. Check the account email address and Gmail sending restrictions.",
+        "connection_failed": "OppFindAgent could not establish an SMTP connection to Gmail. Check the SMTP host/port and whether outbound SMTP is available.",
+    }
     if result != "sent":
-        raise HTTPException(status_code=502, detail="The test email could not be sent. Check the Gmail sender setup.")
+        raise HTTPException(status_code=502, detail=error_messages.get(result, "Gmail could not send the test message. Check the sender configuration and retry."))
     return {"ok": True, "message": f"Test email sent to {user.email}"}
 
 
