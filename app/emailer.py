@@ -133,6 +133,46 @@ class SMTPTransportUnavailable(smtplib.SMTPException):
         super().__init__("; ".join(f"port {port}: {kind}" for port, kind in failures))
 
 
+
+def probe_email_transport() -> dict:
+    """Check SMTP reachability, TLS negotiation and login without sending mail."""
+    if not settings.email_configured or settings.active_email_provider != "smtp":
+        return {"configured": False, "provider": settings.active_email_provider}
+    host = settings.gmail_smtp_host.strip() or "smtp.gmail.com"
+    configured_port = int(settings.gmail_smtp_port or 465)
+    ports = list(dict.fromkeys([configured_port, 587 if configured_port == 465 else 465]))
+    outcomes = []
+    for port in ports:
+        result = {"port": port, "tcp": False, "tls": False, "authenticated": False}
+        try:
+            if port == 465:
+                with smtplib.SMTP_SSL(host, port, context=ssl.create_default_context(), timeout=8) as client:
+                    result["tcp"] = True
+                    client.ehlo()
+                    result["tls"] = True
+                    client.login(settings.gmail_user, settings.gmail_app_password.replace(" ", ""))
+                    result["authenticated"] = True
+            else:
+                with smtplib.SMTP(host, port, timeout=8) as client:
+                    result["tcp"] = True
+                    client.ehlo()
+                    client.starttls(context=ssl.create_default_context())
+                    client.ehlo()
+                    result["tls"] = True
+                    client.login(settings.gmail_user, settings.gmail_app_password.replace(" ", ""))
+                    result["authenticated"] = True
+            outcomes.append(result)
+            return {"configured": True, "host": host, "result": "authenticated", "routes": outcomes}
+        except smtplib.SMTPAuthenticationError as exc:
+            result["stage"] = "authentication"
+            result["smtp_code"] = int(exc.smtp_code or 0)
+            outcomes.append(result)
+        except (smtplib.SMTPException, OSError, ssl.SSLError, TimeoutError) as exc:
+            result["stage"] = "transport"
+            result["error_type"] = type(exc).__name__
+            outcomes.append(result)
+    return {"configured": True, "host": host, "result": "failed", "routes": outcomes}
+
 def send_test_email(recipient: str) -> str:
     payload = {
         "from": settings.email_from,
