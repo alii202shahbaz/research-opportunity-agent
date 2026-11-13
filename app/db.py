@@ -80,6 +80,7 @@ def init_db() -> None:
         # exact semester and deadline-email tracking were introduced.
         profile_additions = {
             "current_semester": "INTEGER",
+            "gender": "VARCHAR(40) NOT NULL DEFAULT ''",
             "deadline_email_enabled": "BOOLEAN NOT NULL DEFAULT FALSE",
             "deadline_emails_json": "TEXT NOT NULL DEFAULT '[]'",
             "manual_cooldown_until": "TIMESTAMP WITH TIME ZONE" if connection.dialect.name == "postgresql" else "DATETIME",
