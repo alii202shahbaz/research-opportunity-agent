@@ -274,7 +274,7 @@ def _ensure_domain_options(token: str, data_source_id: str) -> None:
 
 
 def _notion_schema() -> dict:
-    domain_options = ["Computer Science","Artificial Intelligence","Computer Vision","Computer Systems","Robotics","Mathematics","Statistics","Physics","Chemistry","Biology","Medicine","Psychology","Environmental Science","Engineering","Materials Science","Energy","Agriculture","Economics","Finance","Business","Law","Political Science","Sociology","Anthropology","Education","Linguistics","Literature & History","Philosophy & Ethics","Arts & Design","Architecture & Urban Studies","Communication & Media","Interdisciplinary Research"]
+    domain_options = ["Computer Science","Artificial Intelligence","Computer Vision","Computer Systems","Robotics","Mathematics","Statistics","Physics","Chemistry","Biology","Medicine","Psychology","Environmental Science","Engineering","Materials Science","Energy","Agriculture","Economics","Finance","Business","Law","Political Science","Sociology","Anthropology","Education","Linguistics","Literature & History","Philosophy & Ethics","Arts & Design","Architecture & Urban Studies","Communication & Media","Interdisciplinary Research","Unclassified"]
     return {
         "Program Name": {"title": {}},
         "Institution": {"rich_text": {}},
