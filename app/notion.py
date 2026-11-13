@@ -236,7 +236,7 @@ def search_accessible_pages(db: Session, user_id: str, query: str = "") -> list[
 
 
 DOMAIN_OPTIONS = [
-    "Computer Science", "Artificial Intelligence", "Computer Vision", "Computer Systems",
+    "Computer Science", "Artificial Intelligence", "Computer Vision", "Computer Systems", "Information Security",
     "Robotics", "Mathematics", "Statistics", "Physics", "Chemistry", "Biology",
     "Medicine", "Psychology", "Environmental Science", "Engineering", "Materials Science",
     "Energy", "Agriculture", "Economics", "Finance", "Business", "Law",
@@ -258,14 +258,31 @@ def _ensure_domain_options(token: str, data_source_id: str) -> None:
         multi = domain.get("multi_select", {})
         existing = [item.get("name", "") for item in multi.get("options", [])]
         missing = [item for item in DOMAIN_OPTIONS if item not in existing]
+        patch_properties: dict = {}
         if missing:
             merged = [{"name": item} for item in existing if item]
             merged.extend({"name": item} for item in missing)
+            patch_properties["Academic Domain"] = {"multi_select": {"options": merged}}
+        eligibility_properties = {
+            "Minimum CGPA": {"rich_text": {}},
+            "CGPA Scale": {"number": {"format": "number"}},
+            "CGPA Match": {"rich_text": {}},
+            "Gender Requirement": {"rich_text": {}},
+            "Citizenship Requirement": {"rich_text": {}},
+            "Degree Requirement": {"rich_text": {}},
+            "Minimum Academic Year": {"number": {"format": "number"}},
+            "Minimum Semester": {"number": {"format": "number"}},
+            "Graduation Requirement": {"rich_text": {}},
+        }
+        for name, definition in eligibility_properties.items():
+            if name not in properties:
+                patch_properties[name] = definition
+        if patch_properties:
             _request(
                 "PATCH",
                 f"/data_sources/{data_source_id}",
                 token=token,
-                json={"properties": {"Academic Domain": {"multi_select": {"options": merged}}}},
+                json={"properties": patch_properties},
             )
     except NotionAPIError as exc:
         # The discovery records remain available in the application even if a
@@ -274,7 +291,7 @@ def _ensure_domain_options(token: str, data_source_id: str) -> None:
 
 
 def _notion_schema() -> dict:
-    domain_options = ["Computer Science","Artificial Intelligence","Computer Vision","Computer Systems","Robotics","Mathematics","Statistics","Physics","Chemistry","Biology","Medicine","Psychology","Environmental Science","Engineering","Materials Science","Energy","Agriculture","Economics","Finance","Business","Law","Political Science","Sociology","Anthropology","Education","Linguistics","Literature & History","Philosophy & Ethics","Arts & Design","Architecture & Urban Studies","Communication & Media","Interdisciplinary Research","Unclassified"]
+    domain_options = ["Computer Science","Artificial Intelligence","Computer Vision","Computer Systems","Information Security","Robotics","Mathematics","Statistics","Physics","Chemistry","Biology","Medicine","Psychology","Environmental Science","Engineering","Materials Science","Energy","Agriculture","Economics","Finance","Business","Law","Political Science","Sociology","Anthropology","Education","Linguistics","Literature & History","Philosophy & Ethics","Arts & Design","Architecture & Urban Studies","Communication & Media","Interdisciplinary Research","Unclassified"]
     return {
         "Program Name": {"title": {}},
         "Institution": {"rich_text": {}},
