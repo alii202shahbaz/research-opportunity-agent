@@ -9,11 +9,10 @@
       "maxDuration": 300
     }
   },
-  "schedules": {
-    "oppfindagent-due-user-worker": {
-      "schedule": "*/15 * * * *",
+  "crons": [
+    {
       "path": "/api/cron/worker",
-      "requestMethod": "GET"
+      "schedule": "0 3 * * *"
     }
-  }
+  ]
 }
