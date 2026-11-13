@@ -431,7 +431,10 @@ def _funding(text: str) -> tuple[str, str, str, bool | None, bool | None, str]:
     unpaid = any(x in low for x in ["unpaid internship", "no stipend", "without stipend", "not funded", "unfunded"])
     stipend_matches = re.findall(r"(?:USD|US\$|\$|€|EUR|CHF|GBP|£|CAD|AUD|INR|CNY)\s?[\d,]+(?:\.\d+)?(?:\s?(?:per|\/)?\s?(?:month|week|hour|year|day))?", text, re.I)
     stipend = stipend_matches[0][:120] if stipend_matches else "Not specified"
-    stipend_flag = any(x in low for x in ["stipend", "monthly allowance", "paid internship", "salary", "remuneration"])
+    stipend_flag = (
+        any(x in low for x in ["stipend", "monthly allowance", "paid internship", "salary", "remuneration"])
+        and not any(x in low for x in ["no stipend", "without stipend", "unpaid internship"])
+    )
     scholarship = any(x in low for x in ["scholarship", "financial support", "grant", "tuition waiver"])
     if full:
         funding_type = "Fully funded"
@@ -456,7 +459,9 @@ def _funding(text: str) -> tuple[str, str, str, bool | None, bool | None, str]:
     funding_phrases = []
     if full:
         funding_phrases.append("Full funding")
-    if stipend_flag:
+    if unpaid and any(x in low for x in ["no stipend", "without stipend", "unpaid internship"]):
+        funding_phrases.append("No stipend")
+    elif stipend_flag:
         funding_phrases.append("Stipend")
     if tuition is True:
         funding_phrases.append("Tuition waiver")
