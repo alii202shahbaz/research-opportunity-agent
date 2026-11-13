@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import quote, urlparse
 
-from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request, Response, status
+from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -444,7 +444,6 @@ def notion_disconnect(
 @app.post("/api/run-now")
 def run_now(
     request: Request,
-    background_tasks: BackgroundTasks,
     context=Depends(require_auth_csrf),
     db: Session = Depends(get_db),
 ):
@@ -481,28 +480,33 @@ def run_now(
             headers={"Retry-After": str(remaining)},
         )
 
-    # Start work as a FastAPI background task. The browser receives its
-    # response immediately and polls /api/me for running/success/error status.
-    # Fluid Compute gives the Python function up to five minutes to finish the
-    # bounded discovery and Notion sync without holding the browser request open.
+    # Run discovery inside the awaited request. Vercel documents that
+    # unawaited background work may be paused after the response is sent.
+    # Fluid Compute plus the five-minute maxDuration now provides the required
+    # window, so we keep the completion result and Notion sync in the same task.
     profile.manual_run_requested = True
     profile.manual_cooldown_until = now + timedelta(minutes=15)
     profile.lease_until = now + timedelta(minutes=max(settings.job_lease_minutes, 10))
-    profile.last_run_status = "queued"
-    profile.last_run_summary = "Discovery queued and starting now. Searching for opportunities and syncing Notion."
-    lease = profile.lease_until
+    profile.last_run_status = "running"
+    profile.last_run_summary = "Discovery started. Searching for opportunities and syncing Notion."
     cooldown = profile.manual_cooldown_until
     db.commit()
 
     from app.scheduler import process_user
-    background_tasks.add_task(process_user, user.id)
+    process_user(user.id)
 
+    db.expire_all()
+    refreshed = db.get(UserProfile, user.id)
+    status_value = refreshed.last_run_status if refreshed else "unknown"
+    summary = refreshed.last_run_summary if refreshed else "No run summary was recorded."
+    cooldown_value = _utc_iso(refreshed.manual_cooldown_until) if refreshed else _utc_iso(cooldown)
+    if status_value == "error":
+        raise HTTPException(status_code=502, detail=summary)
     return {
         "ok": True,
-        "status": "queued",
-        "manual_cooldown_until": _utc_iso(cooldown),
-        "lease_until": _utc_iso(lease),
-        "message": "Discovery has started. You can leave this page open to watch its progress.",
+        "status": status_value,
+        "manual_cooldown_until": cooldown_value,
+        "message": f"Discovery finished: {summary}",
     }
 
 
@@ -513,26 +517,16 @@ def email_test(
 ):
     enforce_rate_limit(request, "email_test", 2, 3600)
     user, _session = context
-    transport = probe_email_transport()
-    if transport.get("result") != "authenticated":
-        route_details = "; ".join(
-            f"port {item.get('port')}: {item.get('stage', 'unknown')} ({item.get('error_type', item.get('smtp_code', 'no response'))})"
-            for item in transport.get("routes", [])
-        )
-        raise HTTPException(
-            status_code=502,
-            detail=f"Gmail connection/authentication check failed before sending. {route_details or 'No SMTP route responded.'}",
-        )
-    result = send_test_email(user.email)
+    result, diagnostic = send_test_email(user.email)
     if result == "provider_not_configured":
         raise HTTPException(status_code=503, detail="Email delivery is not configured. Add the Gmail App Password to the production environment variables.")
     error_messages = {
         "authentication_failed": "Gmail rejected the SMTP login. Check that GMAIL_USER is the correct account and GMAIL_APP_PASSWORD is a current Google App Password (not your normal Google password).",
         "recipient_rejected": "Gmail rejected the recipient address. Check the account email address and Gmail sending restrictions.",
-        "connection_failed": "OppFindAgent could not establish an SMTP connection to Gmail. Check the SMTP host/port and whether outbound SMTP is available.",
+        "connection_failed": f"Gmail SMTP failed: {diagnostic or 'connection unavailable'}.",
     }
     if result != "sent":
-        raise HTTPException(status_code=502, detail=error_messages.get(result, "Gmail could not send the test message. Check the sender configuration and retry."))
+        raise HTTPException(status_code=502, detail=diagnostic or error_messages.get(result, "Gmail could not send the test message. Check the sender configuration and retry."))
     return {"ok": True, "message": f"Test email sent to {user.email}"}
 
 
