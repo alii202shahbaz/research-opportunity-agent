@@ -675,10 +675,13 @@ def extract_candidate(result: dict, profile: UserProfile) -> DiscoveredOpportuni
     chosen_application_url = canonicalize_url(discovered_apply_url or source_url)
     if not chosen_application_url:
         return None
-    if discovered_apply_url is None and not _official_domain(source_url):
-        # Third-party listings without a real application portal are not
-        # presented as "Apply Now" links.
-        return None
+    if discovered_apply_url is None:
+        parsed_source = urlparse(source_url)
+        programme_path = (parsed_source.path or "/").strip("/")
+        if not _official_domain(source_url) or not programme_path:
+            # Do not turn a general directory or an institution homepage into
+            # an application link. Third-party results need an explicit portal.
+            return None
     try:
         return DiscoveredOpportunity(
             program_name=title[:400], institution=institution, country=country, domains=domains,
