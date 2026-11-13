@@ -125,6 +125,7 @@ class UserOpportunity(Base):
     application_url: Mapped[str] = mapped_column(Text, nullable=False)
     official_source_url: Mapped[str] = mapped_column(Text, nullable=False)
     eligibility: Mapped[str] = mapped_column(String(40), default="Unknown", nullable=False)
+    eligibility_details_json: Mapped[str] = mapped_column(Text, default="{}", nullable=False)
     verification_status: Mapped[str] = mapped_column(String(40), default="Needs review", nullable=False)
     relevance_score: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     intake_year: Mapped[int] = mapped_column(Integer, default=2027, nullable=False)
