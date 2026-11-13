@@ -31,7 +31,7 @@ def email_delivery_status() -> dict[str, str | bool]:
     if settings.email_configured:
         message = f"Sender credentials are configured for {provider_label}; live delivery is not verified until a test message succeeds."
     elif sender and provider == "smtp":
-        message = "Email delivery is unavailable because the sender credentials are incomplete."
+        message = "Gmail SMTP is selected, but GMAIL_APP_PASSWORD is missing. Create a Google App Password and add it to Vercel Production."
     elif sender and provider == "resend":
         message = "Add the Resend API key to enable delivery."
     else:
