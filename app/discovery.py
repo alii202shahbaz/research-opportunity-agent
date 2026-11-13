@@ -326,7 +326,8 @@ DOMAIN_RULES = {
     "Computer Science": ["computer science", "software engineering", "programming languages", "algorithms", "data structures", "operating systems", "distributed systems", "database systems", "cloud computing", "web development"],
     "Artificial Intelligence": ["artificial intelligence", "machine learning", "deep learning", "neural network", "generative ai", "large language model", "natural language processing", "reinforcement learning", "data mining"],
     "Computer Vision": ["computer vision", "image processing", "visual recognition", "object detection", "image segmentation", "medical imaging", "3d vision", "video analytics"],
-    "Computer Systems": ["computer architecture", "processor design", "risc-v", "riscv", "gpu architecture", "hardware accelerator", "microarchitecture", "embedded systems", "computer networks", "cybersecurity", "information security", "cryptography"],
+    "Computer Systems": ["computer architecture", "processor design", "risc-v", "riscv", "gpu architecture", "hardware accelerator", "microarchitecture", "embedded systems", "computer networks"],
+    "Information Security": ["information security", "cybersecurity", "cyber security", "network security", "application security", "security engineering", "penetration testing", "digital forensics", "malware analysis", "cryptography", "threat detection", "intrusion detection"],
     "Robotics": ["robotics", "autonomous systems", "robot manipulation", "motion planning", "human robot interaction"],
     "Mathematics": ["mathematics", "pure mathematics", "applied mathematics", "number theory", "topology", "algebra", "calculus"],
     "Statistics": ["statistics", "statistical learning", "probability", "biostatistics", "econometrics", "bayesian"],
@@ -378,11 +379,11 @@ def _interest_domains(interests: list[str]) -> set[str]:
             mapped.add(domain)
     # Common specialist names and abbreviations.
     aliases = {
-        "infosec": "Computer Systems",
-        "information assurance": "Computer Systems",
-        "network security": "Computer Systems",
-        "cyber security": "Computer Systems",
-        "cybersecurity": "Computer Systems",
+        "infosec": "Information Security",
+        "information assurance": "Information Security",
+        "network security": "Information Security",
+        "cyber security": "Information Security",
+        "cybersecurity": "Information Security",
         "computer architecture": "Computer Systems",
         "ai/ml": "Artificial Intelligence",
         "machine learning": "Artificial Intelligence",
