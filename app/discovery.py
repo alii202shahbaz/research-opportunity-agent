@@ -102,6 +102,15 @@ def canonicalize_url(raw_url: str) -> str | None:
         hostname = parsed.hostname.lower().rstrip(".")
         if hostname in {"localhost", "localhost.localdomain"}:
             return None
+        blocked_hosts = {
+            "facebook.com", "instagram.com", "twitter.com", "x.com", "linkedin.com",
+            "tiktok.com", "youtube.com", "youtu.be", "threads.net", "reddit.com",
+            "scholarshipportal.com", "scholarships.com", "scholarshiproar.com",
+            "scholarshippositions.com", "opportunitiescorners.com",
+            "opportunitiesforafricans.com", "fullyfundedscholarships.com",
+        }
+        if any(hostname == blocked or hostname.endswith("." + blocked) for blocked in blocked_hosts):
+            return None
         try:
             ip = ipaddress.ip_address(hostname)
             if not ip.is_global:
@@ -259,62 +268,126 @@ def _official_domain(url: str) -> bool:
 
 
 def _infer_institution(title: str, host: str, text: str) -> str:
-    known = ["EPFL", "ETH Zurich", "MIT", "Stanford University", "Carnegie Mellon University", "University of Oxford",
-             "University of Cambridge", "Max Planck", "CERN", "RIKEN", "KAUST", "NUS", "NTU"]
-    haystack = f"{title} {text[:5000]}".lower()
+    haystack = f"{title} {text[:9000]}"
+    low = haystack.lower()
+    known = [
+        "Santa Fe Institute", "University of California, Riverside", "University of California",
+        "EPFL", "ETH Zurich", "MIT", "Stanford University", "Carnegie Mellon University",
+        "University of Oxford", "University of Cambridge", "Max Planck Institute",
+        "CERN", "RIKEN", "KAUST", "National University of Singapore", "Nanyang Technological University",
+        "Harvard University", "Princeton University", "Yale University", "Cornell University",
+        "University of Toronto", "University of British Columbia", "University of Melbourne",
+    ]
     for name in known:
-        if name.lower() in haystack:
+        if name.lower() in low:
             return name
-    match = re.search(r"((?:university|institute|college|laboratory|laboratories)\s+(?:of\s+)?[A-Z][A-Za-z&' -]{2,80})", f"{title} {text[:2500]}")
-    if match:
-        return match.group(1).strip()[:240]
-    return host
+    patterns = [
+        r"\b((?:[A-Z][A-Za-z&.'-]+\s+){0,5}University\s+of\s+[A-Z][A-Za-z&.' -]{2,60})\b",
+        r"\b((?:[A-Z][A-Za-z&.'-]+\s+){0,5}[A-Z][A-Za-z&.'-]+\s+University)\b",
+        r"\b((?:[A-Z][A-Za-z&.'-]+\s+){0,5}[A-Z][A-Za-z&.'-]+\s+(?:Institute|College|Laboratory))\b",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, haystack)
+        if match:
+            candidate = re.sub(r"\s+", " ", match.group(1)).strip(" .,-")
+            if len(candidate) <= 90 and not candidate.lower().startswith(("the application", "the research")):
+                return candidate
+    host = (host or "").lower().split(":")[0].removeprefix("www.")
+    labels = host.split(".")
+    if len(labels) >= 2:
+        label = labels[0]
+        if label not in {"facebook", "instagram", "linkedin", "twitter", "tiktok", "youtube"}:
+            if label.isalpha() and len(label) <= 8 and label.isupper():
+                return label
+            return label.replace("-", " ").title()
+    return "Not identified"
 
 
-def _infer_domains(text: str, interests: list[str]) -> list[str]:
-    low = text.lower()
-    result = []
-    if any(word in low for word in ["computer vision", "image processing", "visual recognition", "object detection", "3d vision"]):
-        result.append("Computer Vision")
-    if any(word in low for word in ["computer architecture", "processor design", "risc-v", "riscv", "gpu architecture", "hardware accelerator", "microarchitecture"]):
-        result.append("Computer Architecture")
-    if any(word in low for word in ["deepfake", "synthetic media", "media forensics", "face manipulation", "deep learning", "machine learning", "artificial intelligence", "neural network"]):
-        result.append("Deepfake & AI/ML")
-    for interest in interests:
-        if interest.lower() in low and interest in {"Computer Vision", "Computer Architecture", "Deepfake Detection", "AI/ML"}:
-            mapped = {"Deepfake Detection": "Deepfake & AI/ML", "AI/ML": "Deepfake & AI/ML"}.get(interest, interest)
-            if mapped not in result:
-                result.append(mapped)
-    return result or ["Other"]
+DOMAIN_RULES = {
+    "Computer Science": ["computer science", "software engineering", "programming languages", "algorithms", "data structures", "operating systems", "distributed systems", "database systems", "cloud computing", "web development"],
+    "Artificial Intelligence": ["artificial intelligence", "machine learning", "deep learning", "neural network", "generative ai", "large language model", "natural language processing", "reinforcement learning", "data mining"],
+    "Computer Vision": ["computer vision", "image processing", "visual recognition", "object detection", "image segmentation", "medical imaging", "3d vision", "video analytics"],
+    "Computer Systems": ["computer architecture", "processor design", "risc-v", "riscv", "gpu architecture", "hardware accelerator", "microarchitecture", "embedded systems", "computer networks", "cybersecurity", "information security", "cryptography"],
+    "Robotics": ["robotics", "autonomous systems", "robot manipulation", "motion planning", "human robot interaction"],
+    "Mathematics": ["mathematics", "pure mathematics", "applied mathematics", "number theory", "topology", "algebra", "calculus"],
+    "Statistics": ["statistics", "statistical learning", "probability", "biostatistics", "econometrics", "bayesian"],
+    "Physics": ["physics", "quantum", "astrophysics", "particle physics", "condensed matter", "optics", "photonics", "nuclear physics"],
+    "Chemistry": ["chemistry", "chemical synthesis", "organic chemistry", "inorganic chemistry", "catalysis", "analytical chemistry"],
+    "Biology": ["biology", "molecular biology", "cell biology", "genetics", "genomics", "microbiology", "biotechnology", "bioinformatics"],
+    "Medicine": ["medicine", "clinical research", "clinical trial", "medical research", "oncology", "neuroscience", "public health", "epidemiology"],
+    "Psychology": ["psychology", "cognitive science", "behavioral science", "mental health", "neuropsychology"],
+    "Environmental Science": ["environmental science", "climate change", "ecology", "biodiversity", "conservation", "sustainability", "earth science"],
+    "Engineering": ["engineering", "mechanical engineering", "electrical engineering", "civil engineering", "chemical engineering", "aerospace", "industrial engineering"],
+    "Materials Science": ["materials science", "nanotechnology", "nanomaterials", "polymers", "semiconductor materials", "metallurgy"],
+    "Energy": ["renewable energy", "solar energy", "wind energy", "battery", "energy storage", "power systems", "hydrogen"],
+    "Agriculture": ["agriculture", "agronomy", "crop science", "food science", "plant science", "animal science", "forestry"],
+    "Economics": ["economics", "microeconomics", "macroeconomics", "development economics", "labor economics"],
+    "Finance": ["finance", "financial markets", "banking", "investment", "risk management", "accounting"],
+    "Business": ["business", "management", "entrepreneurship", "marketing", "supply chain", "operations management"],
+    "Law": ["law", "legal studies", "constitutional law", "human rights law", "international law", "criminology"],
+    "Political Science": ["political science", "public policy", "international relations", "governance", "political economy", "diplomacy"],
+    "Sociology": ["sociology", "social science", "social policy", "demography", "social inequality", "community research"],
+    "Anthropology": ["anthropology", "archaeology", "ethnography", "cultural heritage"],
+    "Education": ["education", "pedagogy", "educational technology", "learning sciences", "curriculum"],
+    "Linguistics": ["linguistics", "language acquisition", "phonetics", "computational linguistics", "translation studies"],
+    "Literature & History": ["literature", "history", "historical research", "classics", "cultural studies", "religious studies"],
+    "Philosophy & Ethics": ["philosophy", "ethics", "bioethics", "moral philosophy", "technology ethics"],
+    "Arts & Design": ["arts", "fine arts", "graphic design", "interaction design", "visual arts", "music research", "film studies"],
+    "Architecture & Urban Studies": ["architecture", "urban planning", "urban studies", "built environment", "landscape architecture"],
+    "Communication & Media": ["communication", "media studies", "journalism", "digital media", "film and media", "media forensics"],
+    "Interdisciplinary Research": ["interdisciplinary", "multidisciplinary", "cross-disciplinary"],
+}
+
+
+def _infer_domains(text: str, interests: list[str] | None = None) -> list[str]:
+    low = re.sub(r"\s+", " ", (text or "").lower())
+    matches = []
+    for domain, keywords in DOMAIN_RULES.items():
+        if any(re.search(r"(?<![a-z0-9])" + re.escape(keyword) + r"(?![a-z0-9])", low) for keyword in keywords):
+            matches.append(domain)
+    if matches:
+        return matches[:5]
+    # A programme can be interdisciplinary even when the page uses unusual
+    # terminology. Never force a user's unrelated interests into its subject.
+    return ["Interdisciplinary Research"]
 
 
 def _extract_deadline(text: str) -> tuple[date | None, str]:
-    terms = list(re.finditer(r"(?:application\s+)?(?:deadline|closing date|apply by|applications close|due date|last date to apply)", text, re.I))
-    for hit in terms[:8]:
-        snippet = text[max(0, hit.start() - 50): min(len(text), hit.end() + 240)]
-        normalized = re.sub(r"(\d)(st|nd|rd|th)\b", r"\1", snippet, flags=re.I)
-        patterns = [
-            r"\b\d{4}-\d{1,2}-\d{1,2}\b",
-            r"\b(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\.?\s+\d{1,2},?\s+20\d{2}\b",
-            r"\b\d{1,2}\s+(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\.?[,]?\s+20\d{2}\b",
-            r"\b\d{1,2}/\d{1,2}/20\d{2}\b",
-        ]
-        formats = ["%Y-%m-%d", "%B %d, %Y", "%b %d, %Y", "%B %d %Y", "%b %d %Y", "%d %B %Y", "%d %b %Y", "%m/%d/%Y", "%d/%m/%Y"]
-        for pattern in patterns:
-            match = re.search(pattern, normalized, re.I)
-            if not match:
-                continue
-            raw_date = match.group(0).replace(".", "")
-            parsed_date = None
-            for fmt in formats:
-                try:
-                    parsed_date = datetime.strptime(raw_date, fmt).date()
-                    break
-                except ValueError:
-                    continue
-            if parsed_date and parsed_date.year >= datetime.now().year - 1:
-                return parsed_date, re.sub(r"\s+", " ", snippet)[:280]
-    return None, "Deadline not reliably extracted; check the official application page."
+    if not text:
+        return None, "Not published"
+    month = r"(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)"
+    date_patterns = [
+        r"\b20\d{2}-\d{1,2}-\d{1,2}\b",
+        rf"\b{month}\.?\s+\d{{1,2}}(?:st|nd|rd|th)?[,]?\s+20\d{{2}}\b",
+        rf"\b\d{{1,2}}(?:st|nd|rd|th)?\s+{month}\.?[,]?\s+20\d{{2}}\b",
+        r"\b\d{1,2}/\d{1,2}/20\d{2}\b",
+    ]
+    marker = re.compile(
+        r"(?:application\s+)?(?:deadline|closing\s+date|apply\s+by|applications?\s+(?:close|due)|due\s+date|last\s+date\s+to\s+apply|submit\s+by)",
+        re.I,
+    )
+    formats = ["%Y-%m-%d", "%B %d, %Y", "%b %d, %Y", "%B %d %Y", "%b %d %Y",
+               "%d %B %Y", "%d %b %Y", "%m/%d/%Y", "%d/%m/%Y"]
+    for hit in marker.finditer(text):
+        window = text[max(0, hit.start() - 65):min(len(text), hit.end() + 190)]
+        normalized = re.sub(r"(\d)(st|nd|rd|th)\b", r"\1", window, flags=re.I)
+        candidates = []
+        for pattern in date_patterns:
+            for match in re.finditer(pattern, normalized, re.I):
+                raw = match.group(0).replace(".", "")
+                parsed = None
+                for fmt in formats:
+                    try:
+                        parsed = datetime.strptime(raw, fmt).date()
+                        break
+                    except ValueError:
+                        continue
+                if parsed and parsed.year >= datetime.now().year - 1:
+                    candidates.append((abs(match.start() - (hit.start() - max(0, hit.start()-65) + hit.end() - hit.start())), parsed))
+        if candidates:
+            candidates.sort(key=lambda item: item[0])
+            return candidates[0][1], "Official deadline"
+    return None, "Not published"
 
 
 def _funding(text: str) -> tuple[str, str, str, bool | None, bool | None, str]:
@@ -334,10 +407,17 @@ def _funding(text: str) -> tuple[str, str, str, bool | None, bool | None, str]:
     else:
         funding_type = "Not disclosed"
     funding_phrases = []
-    for term in ["stipend", "scholarship", "tuition", "travel grant", "travel allowance", "accommodation", "housing", "fully funded", "paid internship"]:
-        for match in list(re.finditer(term, text, re.I))[:1]:
-            funding_phrases.append(re.sub(r"\s+", " ", text[max(0, match.start()-65):match.end()+125]))
-    details = " | ".join(funding_phrases)[:900]
+    if full:
+        funding_phrases.append("Full funding")
+    if stipend_flag:
+        funding_phrases.append("Stipend")
+    if tuition is True:
+        funding_phrases.append("Tuition waiver")
+    if travel is True:
+        funding_phrases.append("Travel grant")
+    if any(x in low for x in ["free accommodation", "housing provided", "accommodation provided", "housing covered"]):
+        funding_phrases.append("Housing")
+    details = " · ".join(funding_phrases[:5]) or "Not specified"
     tuition = True if "tuition waiver" in low or "tuition covered" in low else (False if "tuition is not covered" in low else None)
     travel = True if "travel grant" in low or "travel allowance" in low or "travel costs covered" in low else (False if "travel costs are not covered" in low else None)
     housing = "Provided / covered" if any(x in low for x in ["free accommodation", "housing provided", "accommodation provided", "housing covered"]) else "Not specified"
@@ -484,9 +564,28 @@ def _eligibility(text: str, profile: UserProfile) -> str:
                 return "Ineligible"
         # Different grading systems are not converted using an unreliable ratio.
 
-    if any(term in low for term in ["international students are eligible", "open to international applicants", "all nationalities", "international applicants welcome"]):
+    # Explicit nationality restrictions are checked against the user's
+    # citizenship; do not infer eligibility from a programme's country.
+    citizenship = (getattr(profile, "citizenship", "") or "").lower()
+    nationality_rules = [
+        (r"(?:only\s+)?u\.?s\.?\s+citizens(?:\s+or\s+permanent\s+residents)?\s+only", {"united states", "usa", "american", "u.s."}),
+        (r"(?:only\s+)?canadian\s+citizens\s+only", {"canada", "canadian"}),
+        (r"(?:only\s+)?uk\s+citizens\s+only", {"united kingdom", "uk", "british"}),
+        (r"(?:only\s+)?eu\s+citizens\s+only", {"eu", "european union"}),
+    ]
+    for pattern, allowed in nationality_rules:
+        if re.search(pattern, low):
+            reasons_known = True
+            if not citizenship:
+                return "Unknown"
+            if not any(value in citizenship for value in allowed):
+                return "Ineligible"
+
+    if any(term in low for term in ["international students are eligible", "open to international applicants", "all nationalities", "international applicants welcome", "citizens of any country"]):
         return "Possibly Eligible"
-    return "Possibly Eligible" if reasons_known else "Unknown"
+    # No explicit conflict was found. This is a preliminary screen, not a
+    # guarantee; the official programme rules still need human confirmation.
+    return "Possibly Eligible" if reasons_known or not low else "Possibly Eligible"
 
 
 def extract_candidate(result: dict, profile: UserProfile) -> DiscoveredOpportunity | None:
