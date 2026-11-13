@@ -201,6 +201,18 @@ def cron_email_self_test(request: Request):
     return {"ok": result == "sent", "result": result}
 
 
+@app.get("/api/cron/email-probe", include_in_schema=False)
+def cron_email_probe(request: Request):
+    """Cron-secret protected SMTP reachability and authentication diagnostic."""
+    if not settings.cron_secret:
+        raise HTTPException(status_code=503, detail="Email diagnostic is not configured")
+    supplied = request.headers.get("authorization", "")
+    if not hmac.compare_digest(supplied, f"Bearer {settings.cron_secret}"):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    from app.emailer import probe_email_transport
+    return probe_email_transport()
+
+
 @app.get("/api/csrf")
 def csrf_token(request: Request, response: Response):
     existing = request.cookies.get(CSRF_COOKIE)
