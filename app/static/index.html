@@ -82,7 +82,7 @@
             <fieldset class="form-section wide">
               <legend>Email notifications</legend>
               <div class="wide check-row"><input id="deadlineEmailEnabled" type="checkbox"><label for="deadlineEmailEnabled">Email me a daily deadline digest</label></div>
-              <div class="wide"><label for="deadlineEmails">Recipient email addresses</label><input id="deadlineEmails" type="text" maxlength="2000" placeholder="you@example.com, another@example.com"><span class="hint">These are the recipients. The sender is OppFindAgent (oppfindagent@gmail.com). A daily digest is sent only when pending opportunities have a deadline tomorrow.</span></div>
+              <div class="wide"><label for="deadlineEmails">Recipient email addresses</label><input id="deadlineEmails" type="text" maxlength="2000" placeholder="you@example.com, another@example.com"><span class="hint">These are the recipients. The sender is OppFindAgent (oppfindagent@gmail.com). A digest is sent only when a pending opportunity has a deadline tomorrow. Gmail requires a Google App Password in Vercel Production; your normal Google password will not work.</span></div>
               <div class="wide email-config">
                 <p id="emailSenderStatus" class="hint" role="status">Checking email sender configuration…</p>
                 <button id="testEmailBtn" type="button" class="button button-secondary" disabled>Send a test email to my account address</button>
