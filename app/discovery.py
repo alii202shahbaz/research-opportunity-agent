@@ -441,6 +441,18 @@ def _funding(text: str) -> tuple[str, str, str, bool | None, bool | None, str]:
         funding_type = "Partially funded"
     else:
         funding_type = "Not disclosed"
+    # Extract component-level funding facts before composing the summary.
+    # The previous ordering referenced tuition/travel before assigning them,
+    # crashing every discovery that reached this function.
+    tuition = True if any(x in low for x in ["tuition waiver", "tuition covered"]) else (
+        False if any(x in low for x in ["tuition is not covered", "no tuition coverage"]) else None
+    )
+    travel = True if any(x in low for x in ["travel grant", "travel allowance", "travel costs covered"]) else (
+        False if any(x in low for x in ["travel costs are not covered", "no travel support"]) else None
+    )
+    housing_provided = any(x in low for x in [
+        "free accommodation", "housing provided", "accommodation provided", "housing covered"
+    ])
     funding_phrases = []
     if full:
         funding_phrases.append("Full funding")
@@ -450,12 +462,10 @@ def _funding(text: str) -> tuple[str, str, str, bool | None, bool | None, str]:
         funding_phrases.append("Tuition waiver")
     if travel is True:
         funding_phrases.append("Travel grant")
-    if any(x in low for x in ["free accommodation", "housing provided", "accommodation provided", "housing covered"]):
+    if housing_provided:
         funding_phrases.append("Housing")
     details = " · ".join(funding_phrases[:5]) or "Not specified"
-    tuition = True if "tuition waiver" in low or "tuition covered" in low else (False if "tuition is not covered" in low else None)
-    travel = True if "travel grant" in low or "travel allowance" in low or "travel costs covered" in low else (False if "travel costs are not covered" in low else None)
-    housing = "Provided / covered" if any(x in low for x in ["free accommodation", "housing provided", "accommodation provided", "housing covered"]) else "Not specified"
+    housing = "Provided / covered" if housing_provided else "Not specified"
     return funding_type, details, stipend, tuition, travel, housing
 
 
