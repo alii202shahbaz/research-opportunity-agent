@@ -365,6 +365,34 @@ DOMAIN_RULES = {
 }
 
 
+
+def _interest_domains(interests: list[str]) -> set[str]:
+    """Map arbitrary user topic wording to the broad academic taxonomy."""
+    low = " ".join(interests).lower()
+    mapped = set()
+    for domain, keywords in DOMAIN_RULES.items():
+        if domain.lower() in low or any(
+            re.search(r"(?<![a-z0-9])" + re.escape(keyword) + r"(?![a-z0-9])", low)
+            for keyword in keywords
+        ):
+            mapped.add(domain)
+    # Common specialist names and abbreviations.
+    aliases = {
+        "infosec": "Computer Systems",
+        "information assurance": "Computer Systems",
+        "network security": "Computer Systems",
+        "cyber security": "Computer Systems",
+        "cybersecurity": "Computer Systems",
+        "computer architecture": "Computer Systems",
+        "ai/ml": "Artificial Intelligence",
+        "machine learning": "Artificial Intelligence",
+    }
+    for term, domain in aliases.items():
+        if term in low:
+            mapped.add(domain)
+    return mapped
+
+
 def _infer_domains(text: str, interests: list[str] | None = None) -> list[str]:
     low = re.sub(r"\s+", " ", (text or "").lower())
     matches = []
@@ -677,8 +705,15 @@ def extract_candidate(result: dict, profile: UserProfile) -> DiscoveredOpportuni
     if years and year not in years and not any(y == year - 1 for y in years):
         return None
     interests = json.loads(profile.interests_json or "[]")
-    domains = _infer_domains(content + " " + title, interests)
-    score = _relevance(content + " " + title, interests)
+    # Classify the programme from its title and the beginning of the main
+    # content, not the entire page (which often contains navigation/footer
+    # links to unrelated departments and disciplines).
+    subject_evidence = (title + " " + content[:6000])[:8000]
+    domains = _infer_domains(subject_evidence, interests)
+    score = _relevance(subject_evidence, interests)
+    requested_domains = _interest_domains(interests)
+    if requested_domains and not (requested_domains & set(domains)) and "Interdisciplinary Research" not in domains:
+        return None
     if score < 0.18:
         return None
     funding_type, funding_details, stipend, tuition, travel, housing = _funding(content)
@@ -762,7 +797,7 @@ def discover_for_profile(profile: UserProfile) -> list[DiscoveredOpportunity]:
             time.sleep(0.8)
     finally:
         searcher.close()
-    return candidates
+    return sorted(candidates, key=lambda item: item.relevance_score, reverse=True)
 
 
 def persist_candidates(db: Session, user_id: str, candidates: list[DiscoveredOpportunity]) -> tuple[int, int]:
