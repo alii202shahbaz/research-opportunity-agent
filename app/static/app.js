@@ -331,6 +331,15 @@ function renderOpportunities(items) {
     addField(fields, "DOMAIN", (item.domains || []).join(", ") || "Unclassified");
     addField(fields, "DEADLINE", item.deadline);
     addField(fields, "ELIGIBILITY", item.eligibility);
+    const criteria = item.eligibility_details || {};
+    addField(fields, "MINIMUM CGPA", criteria.minimum_cgpa == null ? "Not stated" : `${criteria.minimum_cgpa}/${criteria.minimum_cgpa_scale || "scale not stated"}`);
+    addField(fields, "CGPA CHECK", criteria.cgpa_match || "Not stated");
+    addField(fields, "GENDER", criteria.gender_requirement || "Not stated");
+    addField(fields, "CITIZENSHIP", criteria.citizenship_requirement || "Not stated");
+    addField(fields, "DEGREE", criteria.degree_requirement || "Not stated");
+    addField(fields, "MINIMUM YEAR", criteria.minimum_academic_year ?? "Not stated");
+    addField(fields, "MINIMUM SEMESTER", criteria.minimum_semester ?? "Not stated");
+    addField(fields, "GRADUATION", criteria.graduation_requirement || "Not stated");
     addField(fields, "FUNDING", item.funding_type);
     addField(fields, "FUNDING DETAILS", item.funding_details);
     addField(fields, "STIPEND", item.stipend);
