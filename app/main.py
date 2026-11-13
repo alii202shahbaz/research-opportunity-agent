@@ -168,10 +168,10 @@ def scheduled_worker(request: Request):
     from app.scheduler import claim_due_users, process_user
     started = time.monotonic()
     processed = 0
-    # The Hobby function limit is shorter than the Pro limit. Claim one user
-    # at a time so users not processed in this invocation are never leased.
-    # Leave a safety margin before the configured 300-second function timeout.
-    while time.monotonic() - started < 240:
+    # Hobby functions are limited to 60 seconds. Claim one user at a
+    # time and stop early so each invocation stays inside that hard limit.
+    # A user's lease remains independent of other users' work.
+    while time.monotonic() - started < 45:
         user_ids = claim_due_users(limit=1)
         if not user_ids:
             break
@@ -184,7 +184,7 @@ def scheduled_worker(request: Request):
         "ok": True,
         "processed": processed,
         "duration_seconds": round(time.monotonic() - started, 1),
-        "more_due_users_may_remain": processed > 0 and time.monotonic() - started >= 240,
+        "more_due_users_may_remain": processed > 0 and time.monotonic() - started >= 45,
     }
 
 @app.post("/api/cron/email-self-test", include_in_schema=False)
