@@ -95,3 +95,12 @@ def test_funding_parser_extracts_tuition_and_travel_before_summary():
     assert result[4] is True
     assert "Tuition waiver" in result[1]
     assert "Travel grant" in result[1]
+
+
+def test_funding_parser_does_not_claim_stipend_when_none_is_offered():
+    from app.discovery import _funding
+
+    result = _funding("This is an unpaid internship with no stipend.")
+    assert result[0] == "Unpaid"
+    assert "Stipend" not in result[1]
+    assert "No stipend" in result[1]
