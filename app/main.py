@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.db import SessionLocal, engine, init_db
-from app.emailer import email_delivery_status, send_test_email, set_application_status
+from app.emailer import email_delivery_status, probe_email_transport, send_test_email, set_application_status
 from app.discovery import canonicalize_url
 from app.models import NotionConnection, OAuthState, User, UserOpportunity, UserProfile, UserSession
 from app.notion import (
@@ -515,6 +515,16 @@ def email_test(
 ):
     enforce_rate_limit(request, "email_test", 2, 3600)
     user, _session = context
+    transport = probe_email_transport()
+    if transport.get("result") != "authenticated":
+        route_details = "; ".join(
+            f"port {item.get('port')}: {item.get('stage', 'unknown')} ({item.get('error_type', item.get('smtp_code', 'no response'))})"
+            for item in transport.get("routes", [])
+        )
+        raise HTTPException(
+            status_code=502,
+            detail=f"Gmail connection/authentication check failed before sending. {route_details or 'No SMTP route responded.'}",
+        )
     result = send_test_email(user.email)
     if result == "provider_not_configured":
         raise HTTPException(status_code=503, detail="Email delivery is not configured. Add the Gmail App Password to the production environment variables.")
