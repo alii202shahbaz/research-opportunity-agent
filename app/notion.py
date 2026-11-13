@@ -244,7 +244,8 @@ DOMAIN_OPTIONS = [
     "Literature & History", "Philosophy & Ethics", "Arts & Design",
     "Architecture & Urban Studies", "Communication & Media", "Data Science",
     "Astronomy & Space Science", "Geosciences", "Public Administration",
-    "Sports Science", "Food Science", "Tourism & Hospitality", "Interdisciplinary Research",
+    "Sports Science", "Food Science", "Tourism & Hospitality",
+    "Interdisciplinary Research", "Unclassified",
 ]
 
 
