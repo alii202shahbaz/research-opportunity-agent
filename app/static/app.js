@@ -260,25 +260,55 @@ function renderOpportunities(items) {
   $("opportunityCount").textContent = `${items.length} found`;
   if (!items.length) {
     target.className = "empty-state";
-    target.innerHTML = '<div class="empty-icon">⌕</div><h3>No opportunities yet</h3><p>Save your research profile and run discovery. Results are only included when there is a relevant source to inspect.</p>';
+    target.innerHTML = '<div class="empty-icon">⌕</div><h3>No opportunities yet</h3><p>Run discovery to find programmes with a verifiable source and application route.</p>';
     return;
   }
   target.className = "opportunity-list";
   target.replaceChildren();
+  const value = (v, fallback = "Not specified") => (v === null || v === undefined || v === "" ? fallback : String(v));
+  const addField = (container, labelText, fieldValue) => {
+    const cell = document.createElement("div");
+    cell.className = "opportunity-field";
+    const label = document.createElement("span");
+    label.className = "field-label";
+    label.textContent = labelText;
+    const content = document.createElement("strong");
+    content.textContent = value(fieldValue);
+    cell.append(label, content);
+    container.append(cell);
+  };
   for (const item of items) {
     const card = document.createElement("article");
     card.className = "opportunity-card";
-    const left = document.createElement("div");
-    const title = document.createElement("h3"); title.textContent = item.program_name;
-    const meta = document.createElement("div"); meta.className = "meta";
-    meta.textContent = `${item.institution} · ${item.country} · ${item.intake_year} intake`;
-    left.append(title, meta);
-    const right = document.createElement("div");
-    const link = document.createElement("a"); link.className = "link"; link.href = item.application_url; link.target = "_blank"; link.rel = "noopener noreferrer"; link.textContent = "Official page ↗";
-    const statusLabel = document.createElement("label"); statusLabel.className = "status-select-label"; statusLabel.textContent = "Application status";
-    const statusSelect = document.createElement("select"); statusSelect.className = "status-select";
+    const heading = document.createElement("div");
+    heading.className = "opportunity-heading";
+    const title = document.createElement("h3");
+    title.textContent = value(item.program_name, "Research opportunity");
+    const meta = document.createElement("div");
+    meta.className = "meta";
+    meta.textContent = `${value(item.institution, "Institution not identified")} · ${value(item.country, "Location not specified")} · ${item.intake_year} intake`;
+    heading.append(title, meta);
+
+    const actions = document.createElement("div");
+    actions.className = "opportunity-actions";
+    const link = document.createElement("a");
+    link.className = "link";
+    link.href = item.application_url;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    link.textContent = "Apply / programme ↗";
+    actions.append(link);
+
+    const statusLabel = document.createElement("label");
+    statusLabel.className = "status-select-label";
+    statusLabel.textContent = "Application status";
+    const statusSelect = document.createElement("select");
+    statusSelect.className = "status-select";
     for (const status of ["Pending", "Waiting", "Done", "Deadline Passed", "Accepted", "Rejected"]) {
-      const option = document.createElement("option"); option.value = status; option.textContent = status; statusSelect.append(option);
+      const option = document.createElement("option");
+      option.value = status;
+      option.textContent = status;
+      statusSelect.append(option);
     }
     statusSelect.value = item.application_status || "Pending";
     statusSelect.addEventListener("change", async () => {
@@ -286,15 +316,51 @@ function renderOpportunities(items) {
       try {
         await api(`/api/opportunities/${encodeURIComponent(item.id)}/application-status`, { method: "PATCH", body: JSON.stringify({ status: statusSelect.value }) });
         toast(`Application status updated: ${statusSelect.value}`);
-      } catch (err) { statusSelect.value = item.application_status || "Pending"; toast(err.message, true); }
-      finally { statusSelect.disabled = false; }
+      } catch (err) {
+        statusSelect.value = item.application_status || "Pending";
+        toast(err.message, true);
+      } finally {
+        statusSelect.disabled = false;
+      }
     });
-    right.append(link, statusLabel, statusSelect);
-    const details = document.createElement("div"); details.className = "details";
-    const tags = [item.funding_type, item.deadline ? `Deadline: ${item.deadline}` : "Deadline unknown", item.verification_status, `Match ${Math.round(item.relevance_score*100)}%`];
-    if (item.domains?.length) tags.push(...item.domains);
-    for (const text of tags) { const tag = document.createElement("span"); tag.className = "tag"; tag.textContent = text; if (text === "Fully funded" || text === "Official Source") tag.classList.add("green"); if (text === "Needs Review" || text === "Not disclosed") tag.classList.add("amber"); details.append(tag); }
-    card.append(left, right, details);
+    actions.append(statusLabel, statusSelect);
+
+    const fields = document.createElement("div");
+    fields.className = "opportunity-fields";
+    addField(fields, "DEADLINE", item.deadline);
+    addField(fields, "ELIGIBILITY", item.eligibility);
+    addField(fields, "FUNDING", item.funding_type);
+    addField(fields, "STIPEND", item.stipend);
+    addField(fields, "TUITION", item.tuition_waiver === true ? "Provided" : item.tuition_waiver === false ? "Not provided" : "Not specified");
+    addField(fields, "TRAVEL", item.travel_grant === true ? "Provided" : item.travel_grant === false ? "Not provided" : "Not specified");
+    addField(fields, "HOUSING", item.housing);
+    addField(fields, "PROGRAM STATUS", item.opportunity_status);
+    addField(fields, "VERIFICATION", item.verification_status);
+
+    const domains = document.createElement("div");
+    domains.className = "opportunity-domains";
+    for (const domain of (item.domains || [])) {
+      const tag = document.createElement("span");
+      tag.className = "tag";
+      tag.textContent = domain;
+      domains.append(tag);
+    }
+
+    const footer = document.createElement("div");
+    footer.className = "opportunity-footer";
+    const score = document.createElement("span");
+    score.className = "muted small";
+    score.textContent = `Match ${Math.round((item.relevance_score || 0) * 100)}% · ${item.intake_confirmed ? "2027 cycle confirmed" : "Cycle needs verification"}`;
+    footer.append(score);
+    const source = document.createElement("a");
+    source.className = "source-link";
+    source.href = item.official_source_url;
+    source.target = "_blank";
+    source.rel = "noopener noreferrer";
+    source.textContent = "Source ↗";
+    footer.append(source);
+
+    card.append(heading, actions, fields, domains, footer);
     target.append(card);
   }
 }
