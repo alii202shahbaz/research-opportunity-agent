@@ -120,6 +120,7 @@ function fillProfile(p) {
   $("currentSemester").value = p.current_semester ?? "";
   $("graduationYear").value = p.graduation_year ?? "";
   $("citizenship").value = p.citizenship || "";
+  $("gender").value = p.gender || "";
   $("interests").value = (p.interests || []).join(", ");
   $("countries").value = (p.preferred_countries || []).join(", ");
   $("funding").value = p.funding_preference || "funded_only";
@@ -405,6 +406,7 @@ $("profileForm").addEventListener("submit", async (event) => {
     current_semester: $("currentSemester").value === "" ? null : Number($("currentSemester").value),
     graduation_year: $("graduationYear").value === "" ? null : Number($("graduationYear").value),
     citizenship: $("citizenship").value,
+    gender: $("gender").value,
     interests: parseCsv($("interests").value), preferred_countries: parseCsv($("countries").value),
     funding_preference: $("funding").value, intake_year: Number($("intakeYear").value),
     intake_season: $("intakeSeason").value, timezone_name: $("timezone").value,
