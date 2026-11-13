@@ -194,12 +194,13 @@ def fetch_page(url: str) -> tuple[str, str, str | None] | None:
                 main = soup.find("main") or soup.find("article") or soup.body or soup
                 text = " ".join(main.stripped_strings)
                 apply_url = None
-                apply_terms = re.compile(r"apply|application|apply now|submit an application|how to apply", re.I)
+                apply_terms = re.compile(r"^(?:apply now|apply here|online application|application portal|submit application|apply for (?:the )?(?:programme|program|internship|fellowship))$", re.I)
                 for anchor in main.find_all("a", href=True):
-                    anchor_text = anchor.get_text(" ", strip=True)
+                    anchor_text = re.sub(r"\s+", " ", anchor.get_text(" ", strip=True)).strip()
                     href = urljoin(current, anchor.get("href", ""))
-                    if apply_terms.search(anchor_text) and canonicalize_url(href):
-                        apply_url = canonicalize_url(href)
+                    canonical_href = canonicalize_url(href)
+                    if anchor_text and apply_terms.search(anchor_text) and canonical_href:
+                        apply_url = canonical_href
                         break
                 if description:
                     text = description + "\n" + text
@@ -238,24 +239,25 @@ def build_queries(profile: UserProfile) -> list[str]:
     else:
         semester_context = ""
 
-    # Group two interests per search expression so the user's full interest
-    # list is represented without issuing one request for every keyword.
+    # Discovery is intentionally not restricted to the user's interests.
+    # Broad programme searches cover multiple disciplines; interests are used
+    # later as a relevance signal, never as an exclusion rule.
+    queries = [
+        f'{year} {season} undergraduate research programmes internships fellowships international students {funded} {location}',
+        f'{year} {season} undergraduate summer research opportunities science humanities social sciences arts engineering {location}',
+        f'{year} {season} research experience undergraduate students international applicants stipend application deadline {location}',
+    ]
     grouped_interests = [interests[i:i + 2] for i in range(0, min(len(interests), 15), 2)]
-    queries = []
     for group in grouped_interests:
         interest_clause = " OR ".join(f'"{interest}"' for interest in group)
         queries.append(
             f'({interest_clause}) {season} {year} {level} {year_context} {semester_context} '
-            f'research internship fellowship "research experience for undergraduates" REU {funded} {location}'
+            f'research internship fellowship scholarship {funded} {location}'
         )
-
-    queries.extend([
-        f'("research experience for undergraduates" OR REU) {season} {year} '
-        f'undergraduate research internship fellowship stipend scholarship application deadline {location}',
-        f'{year} {season} university research internships international students '
-        f'undergraduate fellowship stipend travel accommodation {grad_context} {location}',
-    ])
-    # Stable de-duplication and a hard cap keep API use bounded.
+    queries.append(
+        f'{year} {season} international undergraduate research fellowship programme '
+        f'cross-disciplinary global university institute application {grad_context} {location}'
+    )
     return list(dict.fromkeys(q.strip() for q in queries if q.strip()))[: settings.max_search_queries_per_run]
 
 
@@ -265,6 +267,31 @@ def _official_domain(url: str) -> bool:
     return host.endswith((".edu", ".gov", ".ac.uk", ".edu.au", ".ac.nz", ".edu.cn")) or any(
         part in {"edu", "ac", "gov"} for part in parts[:-1]
     )
+
+
+def _extract_country(text: str) -> str:
+    countries = [
+        "United States", "United Kingdom", "United Arab Emirates", "Saudi Arabia",
+        "South Korea", "North Korea", "New Zealand", "South Africa", "Saudi Arabia",
+        "Pakistan", "Canada", "Australia", "Germany", "France", "Switzerland",
+        "Netherlands", "Sweden", "Norway", "Denmark", "Finland", "Belgium",
+        "Austria", "Italy", "Spain", "Portugal", "Ireland", "Poland", "Czech Republic",
+        "Japan", "China", "India", "Singapore", "Malaysia", "Indonesia", "Thailand",
+        "Vietnam", "Philippines", "Brazil", "Mexico", "Argentina", "Chile", "Egypt",
+        "Turkey", "Türkiye", "Israel", "Jordan", "Qatar", "Kuwait", "Oman",
+        "Kenya", "Nigeria", "Ghana", "Morocco", "Tunisia", "Bangladesh", "Sri Lanka",
+        "Nepal", "Taiwan", "Hong Kong", "Ukraine", "Greece", "Romania", "Hungary",
+    ]
+    low = text.lower()
+    for country in sorted(set(countries), key=len, reverse=True):
+        if re.search(r"(?<![a-z])" + re.escape(country.lower()) + r"(?![a-z])", low):
+            return country
+    match = re.search(r"(?:location|country|based in)\s*:\s*([^\n.;]{2,60})", text, re.I)
+    if match:
+        candidate = re.split(r"[,|]", match.group(1))[0].strip()
+        if 2 <= len(candidate) <= 40 and len(candidate.split()) <= 4:
+            return candidate
+    return "Not specified"
 
 
 def _infer_institution(title: str, host: str, text: str) -> str:
@@ -293,12 +320,9 @@ def _infer_institution(title: str, host: str, text: str) -> str:
             if len(candidate) <= 90 and not candidate.lower().startswith(("the application", "the research")):
                 return candidate
     host = (host or "").lower().split(":")[0].removeprefix("www.")
-    labels = host.split(".")
-    if len(labels) >= 2:
-        label = labels[0]
+    if _official_domain("https://" + host):
+        label = host.split(".")[0]
         if label not in {"facebook", "instagram", "linkedin", "twitter", "tiktok", "youtube"}:
-            if label.isalpha() and len(label) <= 8 and label.isupper():
-                return label
             return label.replace("-", " ").title()
     return "Not identified"
 
@@ -425,13 +449,21 @@ def _funding(text: str) -> tuple[str, str, str, bool | None, bool | None, str]:
 
 
 def _relevance(text: str, interests: list[str]) -> float:
-    low = text.lower()
-    if not interests:
-        return 0.25
+    low = (text or "").lower()
     matches = sum(1 for interest in interests if interest.lower() in low)
-    keyword_bonus = sum(1 for keyword in ["undergraduate", "bachelor", "summer research", "internship", "fellowship", "stipend"] if keyword in low)
-    score = min(1.0, 0.12 + 0.55 * (matches / max(1, len(interests))) + 0.055 * min(keyword_bonus, 6))
-    return round(score, 3)
+    programme_signals = [
+        "undergraduate research", "research experience", "research internship",
+        "summer research", "research fellowship", "student researcher",
+        "undergraduate students", "research programme", "research program",
+    ]
+    programme_hits = sum(1 for term in programme_signals if term in low)
+    funding_hits = sum(1 for term in ["stipend", "fully funded", "scholarship", "travel grant", "housing"] if term in low)
+    # Every genuine research programme gets a base score. User interests
+    # improve ranking but cannot suppress other disciplines.
+    score = 0.22 + min(0.36, programme_hits * 0.06) + min(0.18, funding_hits * 0.03)
+    if interests:
+        score += min(0.24, 0.24 * matches / len(interests))
+    return round(min(1.0, score), 3)
 
 
 def _ordinal_number(value: str) -> int | None:
@@ -627,10 +659,7 @@ def extract_candidate(result: dict, profile: UserProfile) -> DiscoveredOpportuni
     institution = _infer_institution(title, host, content)
     verification = "Official Source" if _official_domain(source_url) else "Needs Review"
     # Do not infer nationality eligibility or a location from the user's profile.
-    country = "Not specified"
-    country_match = re.search(r"(?:location|country|based in)\s*:\s*([A-Z][A-Za-z ,'-]{2,70})", content)
-    if country_match:
-        country = country_match.group(1).strip(" .;,")[:160]
+    country = _extract_country(content)
     eligibility = _eligibility(content, profile)
     # Confirm the target cycle only when the year appears in intake/season
     # context; a copyright footer or unrelated date must not validate the cycle.
@@ -643,7 +672,13 @@ def extract_candidate(result: dict, profile: UserProfile) -> DiscoveredOpportuni
         rf"\bfor\s+(?:the\s+)?{year}\s+(?:intake|cohort)\b",
         rf"\b(?:applications?|program|internship|fellowship)\s+for\s+{year}\b",
     ])
-    chosen_application_url = canonicalize_url(discovered_apply_url or source_url) or source_url
+    chosen_application_url = canonicalize_url(discovered_apply_url or source_url)
+    if not chosen_application_url:
+        return None
+    if discovered_apply_url is None and not _official_domain(source_url):
+        # Third-party listings without a real application portal are not
+        # presented as "Apply Now" links.
+        return None
     try:
         return DiscoveredOpportunity(
             program_name=title[:400], institution=institution, country=country, domains=domains,
