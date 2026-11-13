@@ -235,6 +235,41 @@ def search_accessible_pages(db: Session, user_id: str, query: str = "") -> list[
     return pages
 
 
+DOMAIN_OPTIONS = [
+    "Computer Science", "Artificial Intelligence", "Computer Vision", "Computer Systems",
+    "Robotics", "Mathematics", "Statistics", "Physics", "Chemistry", "Biology",
+    "Medicine", "Psychology", "Environmental Science", "Engineering", "Materials Science",
+    "Energy", "Agriculture", "Economics", "Finance", "Business", "Law",
+    "Political Science", "Sociology", "Anthropology", "Education", "Linguistics",
+    "Literature & History", "Philosophy & Ethics", "Arts & Design",
+    "Architecture & Urban Studies", "Communication & Media", "Interdisciplinary Research",
+]
+
+
+def _ensure_domain_options(token: str, data_source_id: str) -> None:
+    """Keep existing Notion databases compatible with the expanded subject taxonomy."""
+    try:
+        data = _request("GET", f"/data_sources/{data_source_id}", token=token)
+        properties = data.get("properties", {})
+        domain = properties.get("Academic Domain", {})
+        multi = domain.get("multi_select", {})
+        existing = [item.get("name", "") for item in multi.get("options", [])]
+        missing = [item for item in DOMAIN_OPTIONS if item not in existing]
+        if missing:
+            merged = [{"name": item} for item in existing if item]
+            merged.extend({"name": item} for item in missing)
+            _request(
+                "PATCH",
+                f"/data_sources/{data_source_id}",
+                token=token,
+                json={"properties": {"Academic Domain": {"multi_select": {"options": merged}}}},
+            )
+    except NotionAPIError as exc:
+        # The discovery records remain available in the application even if a
+        # workspace owner has restricted schema edits on the existing database.
+        logger.warning("Could not expand Notion domain options (%s)", type(exc).__name__)
+
+
 def _notion_schema() -> dict:
     domain_options = ["Computer Science","Artificial Intelligence","Computer Vision","Computer Systems","Robotics","Mathematics","Statistics","Physics","Chemistry","Biology","Medicine","Psychology","Environmental Science","Engineering","Materials Science","Energy","Agriculture","Economics","Finance","Business","Law","Political Science","Sociology","Anthropology","Education","Linguistics","Literature & History","Philosophy & Ethics","Arts & Design","Architecture & Urban Studies","Communication & Media","Interdisciplinary Research"]
     return {
@@ -376,6 +411,7 @@ def upsert_opportunity_page(db: Session, user_id: str, opp) -> str:
     connection = db.get(NotionConnection, user_id)
     if not connection or not connection.data_source_id:
         raise NotionAPIError("Create a Notion opportunities database before syncing")
+    _ensure_domain_options(_refresh_if_needed(db, connection), connection.data_source_id)
     properties = _property_payload(opp)
     if opp.notion_page_id:
         try:
@@ -434,6 +470,7 @@ def sync_discovered_candidate(context: NotionSyncContext, candidate) -> str | No
     outage does not cause duplicate Notion rows on the next run.
     """
     source_url = str(candidate.official_source_url)
+    _ensure_domain_options(context.access_token, context.data_source_id)
     queried = _request(
         "POST",
         f"/data_sources/{context.data_source_id}/query",
