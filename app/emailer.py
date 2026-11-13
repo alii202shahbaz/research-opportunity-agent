@@ -63,17 +63,49 @@ def _deliver_email(payload: dict, idempotency_key: str = "") -> tuple[str, str]:
             message["Message-ID"] = make_msgid(domain="gmail.com")
         message.set_content(payload.get("text", ""))
         message.add_alternative(payload.get("html", ""), subtype="html")
-        with smtplib.SMTP_SSL(
-            settings.gmail_smtp_host,
-            settings.gmail_smtp_port,
-            context=ssl.create_default_context(),
-            timeout=20,
-        ) as client:
-            client.login(settings.gmail_user, settings.gmail_app_password.replace(" ", ""))
-            refused = client.send_message(message, from_addr=settings.gmail_user, to_addrs=recipients)
-        if refused:
-            raise smtplib.SMTPRecipientsRefused(refused)
-        return "sent", "gmail-smtp"
+
+        # Gmail supports both implicit TLS (465) and STARTTLS (587). Some
+        # serverless network paths reset one route while allowing the other.
+        # Try both explicitly and report the last transport stage without
+        # ever logging credentials or message contents.
+        failures = []
+        host = settings.gmail_smtp_host.strip() or "smtp.gmail.com"
+        configured_port = int(settings.gmail_smtp_port or 465)
+        ports = [configured_port]
+        fallback_port = 587 if configured_port == 465 else 465
+        if fallback_port not in ports:
+            ports.append(fallback_port)
+        for port in ports:
+            try:
+                if port == 465:
+                    with smtplib.SMTP_SSL(
+                        host, port, context=ssl.create_default_context(), timeout=12
+                    ) as client:
+                        client.ehlo()
+                        client.login(settings.gmail_user, settings.gmail_app_password.replace(" ", ""))
+                        refused = client.send_message(
+                            message, from_addr=settings.gmail_user, to_addrs=recipients
+                        )
+                else:
+                    with smtplib.SMTP(host, port, timeout=12) as client:
+                        client.ehlo()
+                        client.starttls(context=ssl.create_default_context())
+                        client.ehlo()
+                        client.login(settings.gmail_user, settings.gmail_app_password.replace(" ", ""))
+                        refused = client.send_message(
+                            message, from_addr=settings.gmail_user, to_addrs=recipients
+                        )
+                if refused:
+                    raise smtplib.SMTPRecipientsRefused(refused)
+                return "sent", f"gmail-smtp-{port}"
+            except smtplib.SMTPAuthenticationError:
+                raise
+            except smtplib.SMTPRecipientsRefused:
+                raise
+            except (smtplib.SMTPException, OSError, ssl.SSLError, TimeoutError) as exc:
+                failures.append((port, type(exc).__name__))
+                logger.warning("Gmail SMTP transport failed on port %s (%s)", port, type(exc).__name__)
+        raise SMTPTransportUnavailable(failures)
 
     if provider == "resend":
         headers = {
@@ -93,6 +125,12 @@ def _deliver_email(payload: dict, idempotency_key: str = "") -> tuple[str, str]:
         return "sent", provider_id
 
     return "provider_not_configured", ""
+
+
+class SMTPTransportUnavailable(smtplib.SMTPException):
+    def __init__(self, failures: list[tuple[int, str]]):
+        self.failures = failures
+        super().__init__("; ".join(f"port {port}: {kind}" for port, kind in failures))
 
 
 def send_test_email(recipient: str) -> str:
@@ -117,7 +155,10 @@ def send_test_email(recipient: str) -> str:
     except smtplib.SMTPRecipientsRefused as exc:
         logger.warning("Test email recipient rejected by SMTP")
         return "recipient_rejected"
-    except (smtplib.SMTPConnectError, smtplib.SMTPServerDisconnected, ssl.SSLError, TimeoutError) as exc:
+    except SMTPTransportUnavailable as exc:
+        logger.warning("All Gmail SMTP routes failed (%s)", str(exc)[:160])
+        return "connection_failed"
+    except (smtplib.SMTPConnectError, smtplib.SMTPServerDisconnected, ssl.SSLError, TimeoutError, OSError) as exc:
         logger.warning("Test email SMTP connection failed (%s)", type(exc).__name__)
         return "connection_failed"
     except (httpx.HTTPError, smtplib.SMTPException, OSError, ValueError, RuntimeError) as exc:
