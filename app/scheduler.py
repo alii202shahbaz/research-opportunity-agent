@@ -192,14 +192,20 @@ def process_user(user_id: str) -> None:
     except Exception as exc:
         db.rollback()
         logger.exception("Daily job failed for user %s (%s)", user_id[:8], type(exc).__name__)
-        # On DB outages, leave the lease to expire so the job can retry.
+        # Never release a failed job straight back into the due queue.
+        # The old behavior cleared the lease while leaving manual_run_requested
+        # true, so a batch worker could rediscover the same broken profile dozens
+        # of times in one invocation. Apply a bounded retry backoff instead.
         try:
             profile = db.get(UserProfile, user_id)
             if profile:
-                profile.last_run_at = datetime.now(timezone.utc)
+                failed_at = datetime.now(timezone.utc)
+                profile.last_run_at = failed_at
                 profile.last_run_status = "error"
-                profile.last_run_summary = f"Job failed: {type(exc).__name__}"[:500]
+                profile.last_run_summary = f"Job failed: {type(exc).__name__}. Retry scheduled after 15 minutes."[:500]
+                profile.manual_run_requested = False
                 profile.lease_until = None
+                profile.next_run_at = failed_at + timedelta(minutes=15)
                 db.commit()
         except Exception:
             db.rollback()
