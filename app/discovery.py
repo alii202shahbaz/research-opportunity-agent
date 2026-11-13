@@ -298,7 +298,8 @@ def _infer_institution(title: str, host: str, text: str) -> str:
     haystack = f"{title} {text[:9000]}"
     low = haystack.lower()
     known = [
-        "Santa Fe Institute", "University of California, Riverside", "University of California",
+        "Santa Fe Institute", "University of California, Riverside", "UC Riverside",
+        "University of California Riverside", "UCR", "University of California",
         "EPFL", "ETH Zurich", "MIT", "Stanford University", "Carnegie Mellon University",
         "University of Oxford", "University of Cambridge", "Max Planck Institute",
         "CERN", "RIKEN", "KAUST", "National University of Singapore", "Nanyang Technological University",
@@ -307,6 +308,8 @@ def _infer_institution(title: str, host: str, text: str) -> str:
     ]
     for name in known:
         if name.lower() in low:
+            if name.lower() in {"ucr", "uc riverside", "university of california riverside"}:
+                return "University of California, Riverside"
             return name
     patterns = [
         r"\b((?:[A-Z][A-Za-z&.'-]+\s+){0,5}University\s+of\s+[A-Z][A-Za-z&.' -]{2,60})\b",
@@ -380,7 +383,7 @@ def _infer_domains(text: str, interests: list[str] | None = None) -> list[str]:
         return matches[:5]
     # A programme can be interdisciplinary even when the page uses unusual
     # terminology. Never force a user's unrelated interests into its subject.
-    return ["Interdisciplinary Research"]
+    return ["Unclassified"]
 
 
 def _extract_deadline(text: str) -> tuple[date | None, str]:
