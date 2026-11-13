@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import quote, urlparse
 
-from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request, Response, status
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -444,6 +444,7 @@ def notion_disconnect(
 @app.post("/api/run-now")
 def run_now(
     request: Request,
+    background_tasks: BackgroundTasks,
     context=Depends(require_auth_csrf),
     db: Session = Depends(get_db),
 ):
@@ -480,31 +481,28 @@ def run_now(
             headers={"Retry-After": str(remaining)},
         )
 
-    # Manual discovery is executed immediately inside this request; it is not queued
-    # for a future Vercel Cron invocation. Commit a cooldown and lease before running
-    # so a second tab/device cannot start a duplicate scan.
+    # Start work as a FastAPI background task. The browser receives its
+    # response immediately and polls /api/me for running/success/error status.
+    # Fluid Compute gives the Python function up to five minutes to finish the
+    # bounded discovery and Notion sync without holding the browser request open.
     profile.manual_run_requested = True
     profile.manual_cooldown_until = now + timedelta(minutes=15)
     profile.lease_until = now + timedelta(minutes=max(settings.job_lease_minutes, 10))
-    profile.last_run_status = "running"
-    profile.last_run_summary = "Manual discovery started. Searching for opportunities and syncing Notion."
+    profile.last_run_status = "queued"
+    profile.last_run_summary = "Discovery queued and starting now. Searching for opportunities and syncing Notion."
+    lease = profile.lease_until
+    cooldown = profile.manual_cooldown_until
     db.commit()
 
     from app.scheduler import process_user
-    process_user(user.id)
+    background_tasks.add_task(process_user, user.id)
 
-    db.expire_all()
-    refreshed = db.get(UserProfile, user.id)
-    status_value = refreshed.last_run_status if refreshed else "unknown"
-    summary = refreshed.last_run_summary if refreshed else "No run summary was recorded."
-    cooldown = _utc_iso(refreshed.manual_cooldown_until) if refreshed else None
-    if status_value == "error":
-        raise HTTPException(status_code=502, detail=summary)
     return {
         "ok": True,
-        "status": status_value,
-        "manual_cooldown_until": cooldown,
-        "message": f"Discovery finished: {summary}",
+        "status": "queued",
+        "manual_cooldown_until": _utc_iso(cooldown),
+        "lease_until": _utc_iso(lease),
+        "message": "Discovery has started. You can leave this page open to watch its progress.",
     }
 
 
