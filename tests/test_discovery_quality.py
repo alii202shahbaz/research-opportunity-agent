@@ -75,3 +75,23 @@ def test_unmatched_domains_are_not_mislabeled_interdisciplinary():
 
 def test_ucr_is_normalized_to_full_institution_name():
     assert _infer_institution("UCR Summer Research", "www.ucr.edu", "UCR programme") == "University of California, Riverside"
+
+
+def test_funding_parser_handles_no_tuition_or_travel_mentions():
+    from app.discovery import _funding
+
+    result = _funding("A summer undergraduate research programme offers a monthly stipend.")
+    assert result[0] == "Partially funded"
+    assert result[3] is None
+    assert result[4] is None
+
+
+def test_funding_parser_extracts_tuition_and_travel_before_summary():
+    from app.discovery import _funding
+
+    result = _funding("Fully funded programme with tuition waiver and travel grant.")
+    assert result[0] == "Fully funded"
+    assert result[3] is True
+    assert result[4] is True
+    assert "Tuition waiver" in result[1]
+    assert "Travel grant" in result[1]
