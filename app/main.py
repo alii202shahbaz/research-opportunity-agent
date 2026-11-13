@@ -187,6 +187,20 @@ def scheduled_worker(request: Request):
         "more_due_users_may_remain": processed > 0 and time.monotonic() - started >= 240,
     }
 
+@app.post("/api/cron/email-self-test", include_in_schema=False)
+def cron_email_self_test(request: Request):
+    """Send one diagnostic test message to the configured Gmail sender inbox."""
+    if not settings.cron_secret:
+        raise HTTPException(status_code=503, detail="Email diagnostic is not configured")
+    supplied = request.headers.get("authorization", "")
+    if not hmac.compare_digest(supplied, f"Bearer {settings.cron_secret}"):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    if not settings.gmail_user:
+        raise HTTPException(status_code=503, detail="Gmail sender address is not configured")
+    result = send_test_email(settings.gmail_user)
+    return {"ok": result == "sent", "result": result}
+
+
 @app.get("/api/csrf")
 def csrf_token(request: Request, response: Response):
     existing = request.cookies.get(CSRF_COOKIE)
