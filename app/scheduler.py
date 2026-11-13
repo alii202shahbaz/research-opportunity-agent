@@ -158,6 +158,16 @@ def process_user(user_id: str) -> None:
         notion = db.get(NotionConnection, user_id)
         synced = 0
         sync_errors = notion_direct_errors + (1 if notion_prepare_error else 0)
+        if not notion:
+            notion_sync_state = "Notion not connected"
+            sync_errors += 1
+        elif not notion.data_source_id:
+            notion_sync_state = "Notion database not configured"
+            sync_errors += 1
+        elif notion_prepare_error:
+            notion_sync_state = "Notion connection failed"
+        else:
+            notion_sync_state = "Notion connected"
         if notion and notion.data_source_id and not notion_prepare_error:
             rows = db.scalars(
                 select(UserOpportunity).where(UserOpportunity.user_id == user_id)
@@ -182,7 +192,7 @@ def process_user(user_id: str) -> None:
         profile.last_run_status = "partial" if sync_errors else "success"
         profile.last_run_summary = (
             f"{len(candidates)} candidates; {inserted} new; {updated} updated; "
-            f"{synced + notion_direct_synced} Notion rows synced; {sync_errors} sync errors; "
+            f"{synced + notion_direct_synced} Notion rows synced; {notion_sync_state}; {sync_errors} sync errors; "
             f"{expired_count} deadlines passed; {archived_count} old opportunities archived; "
             f"email digest: {email_result}"
         )[:500]
