@@ -111,6 +111,15 @@ def send_test_email(recipient: str) -> str:
     try:
         status, _provider_id = _deliver_email(payload)
         return status
+    except smtplib.SMTPAuthenticationError as exc:
+        logger.warning("Test email authentication rejected by SMTP (code=%s)", exc.smtp_code)
+        return "authentication_failed"
+    except smtplib.SMTPRecipientsRefused as exc:
+        logger.warning("Test email recipient rejected by SMTP")
+        return "recipient_rejected"
+    except (smtplib.SMTPConnectError, smtplib.SMTPServerDisconnected, ssl.SSLError, TimeoutError) as exc:
+        logger.warning("Test email SMTP connection failed (%s)", type(exc).__name__)
+        return "connection_failed"
     except (httpx.HTTPError, smtplib.SMTPException, OSError, ValueError, RuntimeError) as exc:
         logger.warning("Test email failed (%s)", type(exc).__name__)
         return "failed"
