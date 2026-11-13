@@ -104,3 +104,51 @@ def test_funding_parser_does_not_claim_stipend_when_none_is_offered():
     assert result[0] == "Unpaid"
     assert "Stipend" not in result[1]
     assert "No stipend" in result[1]
+
+
+def test_information_security_is_a_distinct_domain():
+    from app.discovery import _interest_domains
+
+    assert _interest_domains(["Information Security"]) == {"Information Security"}
+    assert "Computer Systems" not in _interest_domains(["Information Security"])
+
+
+def test_queries_prioritize_requested_information_security():
+    import json
+    from types import SimpleNamespace
+    from app.discovery import build_queries
+
+    profile = SimpleNamespace(
+        interests_json=json.dumps(["Information Security"]),
+        preferred_countries_json=json.dumps(["Switzerland", "Germany"]),
+        funding_preference="funded_only",
+        intake_year=2027,
+        intake_season="Summer",
+        degree="Bachelor of Science",
+        current_year="3rd year",
+        current_semester=5,
+        graduation_year=2028,
+    )
+    queries = build_queries(profile)
+    assert queries
+    assert all("information security" in q.lower() or "cybersecurity" in q.lower() or "network security" in q.lower() or "application security" in q.lower() or "malware analysis" in q.lower() or "digital forensics" in q.lower() or "cryptography" in q.lower() for q in queries)
+    assert not any("humanities social sciences arts" in q.lower() for q in queries)
+
+
+def test_eligibility_breakdown_extracts_gpa_gender_and_degree():
+    from types import SimpleNamespace
+    from app.discovery import _eligibility_breakdown
+
+    profile = SimpleNamespace(cgpa=3.5, cgpa_scale=4.0)
+    details = _eligibility_breakdown(
+        "Applicants must have a minimum GPA of 3.0/4.0. "
+        "Undergraduate students only. Women applicants only. "
+        "International applicants welcome.",
+        profile,
+    )
+    assert details["minimum_cgpa"] == 3.0
+    assert details["minimum_cgpa_scale"] == 4.0
+    assert details["cgpa_match"] == "Meets requirement"
+    assert details["gender_requirement"] == "Women only"
+    assert details["degree_requirement"] == "Undergraduate only"
+    assert details["citizenship_requirement"] == "International applicants welcome"
