@@ -21,3 +21,15 @@
 .email-config{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;padding:11px 12px;border:1px solid var(--line);border-radius:9px;background:#fbfcfe}
 .email-config .hint{margin:0;flex:1 1 100%}
 .email-config .small{overflow-wrap:anywhere}
+
+.opportunity-card{grid-template-columns:minmax(0,1fr) auto;align-items:start;gap:12px 18px}
+.opportunity-heading{min-width:0}.opportunity-heading h3{font-size:16px;line-height:1.35}
+.opportunity-actions{display:flex;flex-direction:column;align-items:flex-end;gap:5px;min-width:150px}
+.opportunity-fields{grid-column:1/-1;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;padding:12px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.opportunity-field{display:flex;flex-direction:column;gap:4px;min-width:0}
+.opportunity-field .field-label{font-size:9px;letter-spacing:.08em;font-weight:800;color:var(--muted)}
+.opportunity-field strong{font-size:12px;font-weight:650;line-height:1.35;overflow-wrap:anywhere}
+.opportunity-domains{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:6px}
+.opportunity-footer{grid-column:1/-1;display:flex;align-items:center;justify-content:space-between;gap:12px}
+.source-link{font-size:11px;color:var(--muted);text-decoration:none}
+@media(max-width:600px){.opportunity-card{grid-template-columns:1fr}.opportunity-actions{align-items:flex-start}.opportunity-fields{grid-template-columns:repeat(2,minmax(0,1fr))}.opportunity-footer{grid-column:1}}
