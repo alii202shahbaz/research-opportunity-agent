@@ -36,9 +36,9 @@ class Settings(BaseSettings):
     gmail_smtp_host: str = "smtp.gmail.com"
     gmail_smtp_port: int = 465
     cron_secret: str = ""
-    search_results_per_query: int = 8
-    max_search_queries_per_run: int = 5
-    max_pages_per_run: int = 30
+    search_results_per_query: int = 6
+    max_search_queries_per_run: int = 3
+    max_pages_per_run: int = 8
     worker_poll_seconds: int = 30
     job_lease_minutes: int = 10
 
