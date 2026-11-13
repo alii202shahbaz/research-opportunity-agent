@@ -32,6 +32,7 @@ class ProfileIn(BaseModel):
     current_semester: int | None = Field(default=None, ge=1, le=16)
     graduation_year: int | None = Field(default=None, ge=2000, le=2100)
     citizenship: str = Field(default="", max_length=100)
+    gender: Literal["", "Woman", "Man", "Non-binary", "Prefer not to say"] = ""
     interests: list[str] = Field(default_factory=list, max_length=15)
     preferred_countries: list[str] = Field(default_factory=list, max_length=30)
     funding_preference: Literal["funded_only", "funded_and_partial", "any"] = "funded_only"
