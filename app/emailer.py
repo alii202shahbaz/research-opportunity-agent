@@ -140,6 +140,52 @@ class SMTPTransportUnavailable(smtplib.SMTPException):
         )
         super().__init__(summary)
 
+
+def probe_email_transport() -> dict:
+    """Check Gmail TCP/TLS/authentication stage without sending a message."""
+    if not settings.email_configured or settings.active_email_provider != "smtp":
+        return {"configured": False, "provider": settings.active_email_provider}
+    host = settings.gmail_smtp_host.strip() or "smtp.gmail.com"
+    configured_port = int(settings.gmail_smtp_port or 465)
+    ports = list(dict.fromkeys([configured_port, 587 if configured_port == 465 else 465]))
+    outcomes = []
+    for port in ports:
+        route = {"port": port, "tcp": False, "tls": False, "authenticated": False}
+        stage = "connect"
+        try:
+            if port == 465:
+                with smtplib.SMTP_SSL(host, port, context=ssl.create_default_context(), timeout=8) as client:
+                    route["tcp"] = True
+                    stage = "ehlo"
+                    client.ehlo()
+                    route["tls"] = True
+                    stage = "authentication"
+                    client.login(settings.gmail_user, settings.gmail_app_password.replace(" ", ""))
+                    route["authenticated"] = True
+            else:
+                with smtplib.SMTP(host, port, timeout=8) as client:
+                    route["tcp"] = True
+                    stage = "ehlo"
+                    client.ehlo()
+                    stage = "tls"
+                    client.starttls(context=ssl.create_default_context())
+                    client.ehlo()
+                    route["tls"] = True
+                    stage = "authentication"
+                    client.login(settings.gmail_user, settings.gmail_app_password.replace(" ", ""))
+                    route["authenticated"] = True
+            outcomes.append(route)
+            return {"configured": True, "host": host, "result": "authenticated", "routes": outcomes}
+        except smtplib.SMTPAuthenticationError as exc:
+            route["stage"] = "authentication"
+            route["smtp_code"] = int(exc.smtp_code or 0)
+            outcomes.append(route)
+        except (smtplib.SMTPException, OSError, ssl.SSLError, TimeoutError) as exc:
+            route["stage"] = stage
+            route["error_type"] = type(exc).__name__
+            outcomes.append(route)
+    return {"configured": True, "host": host, "result": "failed", "routes": outcomes}
+
 def send_test_email(recipient: str) -> tuple[str, str]:
     payload = {
         "from": settings.email_from,
