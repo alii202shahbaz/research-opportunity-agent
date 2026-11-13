@@ -241,6 +241,7 @@ def _profile_payload(profile: UserProfile | None) -> dict | None:
         "current_semester": profile.current_semester,
         "graduation_year": profile.graduation_year,
         "citizenship": profile.citizenship,
+        "gender": profile.gender,
         "interests": json.loads(profile.interests_json or "[]"),
         "preferred_countries": json.loads(profile.preferred_countries_json or "[]"),
         "funding_preference": profile.funding_preference,
@@ -352,7 +353,7 @@ def save_profile(
     if not profile:
         profile = UserProfile(user_id=user.id)
         db.add(profile)
-    for field in ["degree", "university", "cgpa", "cgpa_scale", "current_year", "current_semester", "graduation_year", "citizenship",
+    for field in ["degree", "university", "cgpa", "cgpa_scale", "current_year", "current_semester", "graduation_year", "citizenship", "gender",
                   "funding_preference", "intake_year", "intake_season", "timezone_name", "update_hour", "automation_enabled", "deadline_email_enabled"]:
         setattr(profile, field, getattr(payload, field))
     profile.deadline_emails_json = json.dumps(payload.deadline_emails)
