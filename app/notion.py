@@ -236,18 +236,12 @@ def search_accessible_pages(db: Session, user_id: str, query: str = "") -> list[
 
 
 def _notion_schema() -> dict:
+    domain_options = ["Computer Science","Artificial Intelligence","Computer Vision","Computer Systems","Robotics","Mathematics","Statistics","Physics","Chemistry","Biology","Medicine","Psychology","Environmental Science","Engineering","Materials Science","Energy","Agriculture","Economics","Finance","Business","Law","Political Science","Sociology","Anthropology","Education","Linguistics","Literature & History","Philosophy & Ethics","Arts & Design","Architecture & Urban Studies","Communication & Media","Interdisciplinary Research"]
     return {
         "Program Name": {"title": {}},
         "Institution": {"rich_text": {}},
         "Country / Location": {"rich_text": {}},
-        "Academic Domain": {
-            "multi_select": {"options": [
-                {"name": "Computer Vision"},
-                {"name": "Computer Architecture"},
-                {"name": "Deepfake & AI/ML"},
-                {"name": "Other"},
-            ]}
-        },
+        "Academic Domain": {"multi_select": {"options": [{"name": item} for item in domain_options]}},
         "Funding Type": {"select": {"options": [
             {"name": "Fully Funded"}, {"name": "Partially Funded"},
             {"name": "Unpaid"}, {"name": "Not Disclosed"},
@@ -281,6 +275,7 @@ def _notion_schema() -> dict:
             {"name": "Deadline Passed"}, {"name": "Accepted"}, {"name": "Rejected"},
         ]}},
     }
+
 
 
 def create_opportunity_database(db: Session, user_id: str, parent_page_id: str) -> dict[str, str]:
@@ -350,7 +345,7 @@ def _property_payload(opp) -> dict:
         "Program Name": {"title": _rt(opp.program_name)},
         "Institution": {"rich_text": _rt(opp.institution)},
         "Country / Location": {"rich_text": _rt(opp.country)},
-        "Academic Domain": {"multi_select": [{"name": d} for d in domains if d in {"Computer Vision", "Computer Architecture", "Deepfake & AI/ML", "Other"}]},
+        "Academic Domain": {"multi_select": [{"name": d} for d in domains if d and len(d) <= 100]},
         "Funding Type": {"select": {"name": funding_map.get(opp.funding_type, "Not Disclosed")}},
         "Funding Details": {"rich_text": _rt(opp.funding_details)},
         "Stipend": {"rich_text": _rt(opp.stipend)},
