@@ -67,3 +67,11 @@ def test_country_is_a_short_value():
     assert _extract_country(
         "The programme is based in the United States and welcomes applicants."
     ) == "United States"
+
+
+def test_unmatched_domains_are_not_mislabeled_interdisciplinary():
+    assert _infer_domains("Undergraduate research opportunity with a funded fellowship.") == ["Unclassified"]
+
+
+def test_ucr_is_normalized_to_full_institution_name():
+    assert _infer_institution("UCR Summer Research", "www.ucr.edu", "UCR programme") == "University of California, Riverside"
