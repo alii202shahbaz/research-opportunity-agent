@@ -145,6 +145,8 @@ def healthz():
     return {
         "status": status_value,
         "database": database_status,
+        "database_engine": engine.dialect.name,
+        "multi_user_storage": "shared persistent database" if engine.dialect.name != "sqlite" else "local SQLite (not suitable for multi-instance production)",
         "scheduler_secret_configured": bool(settings.cron_secret),
         "email": {
             "configured": bool(email_status.get("configured")),
