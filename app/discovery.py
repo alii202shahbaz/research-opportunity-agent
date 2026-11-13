@@ -51,7 +51,7 @@ class TavilySearch:
 
     def __init__(self, api_key: str):
         self.api_key = api_key
-        self.client = httpx.Client(timeout=httpx.Timeout(35.0, connect=10.0), follow_redirects=False)
+        self.client = httpx.Client(timeout=httpx.Timeout(20.0, connect=7.0), follow_redirects=False)
 
     def search(self, query: str, count: int = 8) -> list[dict]:
         response = None
@@ -155,7 +155,7 @@ def fetch_page(url: str) -> tuple[str, str, str | None] | None:
     headers = {"User-Agent": "ResearchOpportunityAgent/0.1 (research programme metadata collector)",
                "Accept": "text/html,application/xhtml+xml"}
     try:
-        with httpx.Client(timeout=httpx.Timeout(18.0, connect=7.0), follow_redirects=False, trust_env=False) as client:
+        with httpx.Client(timeout=httpx.Timeout(12.0, connect=5.0), follow_redirects=False, trust_env=False) as client:
             for _ in range(4):
                 if not _safe_public_host(current):
                     return None
