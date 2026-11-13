@@ -242,7 +242,9 @@ DOMAIN_OPTIONS = [
     "Energy", "Agriculture", "Economics", "Finance", "Business", "Law",
     "Political Science", "Sociology", "Anthropology", "Education", "Linguistics",
     "Literature & History", "Philosophy & Ethics", "Arts & Design",
-    "Architecture & Urban Studies", "Communication & Media", "Interdisciplinary Research",
+    "Architecture & Urban Studies", "Communication & Media", "Data Science",
+    "Astronomy & Space Science", "Geosciences", "Public Administration",
+    "Sports Science", "Food Science", "Tourism & Hospitality", "Interdisciplinary Research",
 ]
 
 
