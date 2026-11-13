@@ -11,7 +11,7 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from fastapi import Cookie, Depends, Header, HTTPException, Request, Response, status
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerificationError, VerifyMismatchError
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
@@ -154,10 +154,29 @@ def get_current_context(
     if not user or not user.is_active:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Account unavailable")
 
-    # Ten-minute inactivity timeout. Authenticated API activity refreshes the
-    # browser cookie and extends the database expiry before it gets too close.
+    # Ten-minute inactivity timeout. Refresh with a conditional SQL UPDATE
+    # rather than mutating the ORM object loaded above. Another parallel request
+    # may log out/delete this session between the SELECT and COMMIT; ORM flush
+    # then raises StaleDataError and turns otherwise healthy dashboard calls
+    # into 500s. A conditional update makes that race an ordinary expired
+    # session (401) instead.
     now = datetime.now(timezone.utc)
-    session.expires_at = now + timedelta(minutes=settings.session_idle_minutes)
+    refresh = db.execute(
+        update(UserSession)
+        .where(
+            UserSession.id == session.id,
+            UserSession.token_hash == sha256_hex(session_token),
+            UserSession.expires_at > now,
+        )
+        .values(expires_at=now + timedelta(minutes=settings.session_idle_minutes))
+        .execution_options(synchronize_session=False)
+    )
+    if refresh.rowcount != 1:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Session expired. Please sign in again.",
+        )
     db.commit()
     response.set_cookie(
         SESSION_COOKIE, session_token,
