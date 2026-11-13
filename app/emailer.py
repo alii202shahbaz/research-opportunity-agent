@@ -29,7 +29,7 @@ def email_delivery_status() -> dict[str, str | bool]:
     sender = parseaddr(settings.email_from)[1] if settings.email_from else ""
     provider_label = "Gmail SMTP" if provider == "smtp" else "Resend" if provider == "resend" else "Not configured"
     if settings.email_configured:
-        message = f"Ready to send through {provider_label}."
+        message = f"Sender credentials are configured for {provider_label}; live delivery is not verified until a test message succeeds."
     elif sender and provider == "smtp":
         message = "Email delivery is unavailable because the sender credentials are incomplete."
     elif sender and provider == "resend":
