@@ -399,6 +399,7 @@ def _extract_deadline(text: str) -> tuple[date | None, str]:
         for pattern in date_patterns:
             for match in re.finditer(pattern, normalized, re.I):
                 raw = match.group(0).replace(".", "")
+                raw = re.sub(r"^Sept\\b", "Sep", raw, flags=re.I)
                 parsed = None
                 for fmt in formats:
                     try:
