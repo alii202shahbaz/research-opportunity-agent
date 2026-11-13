@@ -359,6 +359,13 @@ DOMAIN_RULES = {
     "Arts & Design": ["arts", "fine arts", "graphic design", "interaction design", "visual arts", "music research", "film studies"],
     "Architecture & Urban Studies": ["architecture", "urban planning", "urban studies", "built environment", "landscape architecture"],
     "Communication & Media": ["communication", "media studies", "journalism", "digital media", "film and media", "media forensics"],
+    "Data Science": ["data science", "data analytics", "big data", "data engineering", "data visualization"],
+    "Astronomy & Space Science": ["astronomy", "astrophysics", "planetary science", "space science", "aerospace science", "space exploration"],
+    "Geosciences": ["geoscience", "geology", "geophysics", "oceanography", "meteorology", "seismology", "hydrology"],
+    "Public Administration": ["public administration", "public management", "public affairs", "policy analysis"],
+    "Sports Science": ["sports science", "sport science", "kinesiology", "exercise science", "sport psychology"],
+    "Food Science": ["food science", "food technology", "nutrition science", "food safety"],
+    "Tourism & Hospitality": ["tourism", "hospitality", "hotel management", "event management"],
     "Interdisciplinary Research": ["interdisciplinary", "multidisciplinary", "cross-disciplinary"],
 }
 
