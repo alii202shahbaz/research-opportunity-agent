@@ -44,6 +44,30 @@ def email_delivery_status() -> dict[str, str | bool]:
     }
 
 
+
+def set_application_status(
+    db: Session,
+    user_id: str,
+    opportunity: UserOpportunity,
+    status: str,
+) -> UserOpportunity:
+    """Validate and persist a user's application status on their opportunity."""
+    allowed = {
+        "Pending",
+        "Waiting",
+        "Done",
+        "Deadline Passed",
+        "Accepted",
+        "Rejected",
+    }
+    if status not in allowed:
+        raise ValueError("Choose a valid application status.")
+    if opportunity.user_id != user_id:
+        raise ValueError("Opportunity does not belong to this account.")
+    opportunity.application_status = status
+    db.commit()
+    return opportunity
+
 def _deliver_email(payload: dict, idempotency_key: str = "") -> tuple[str, str]:
     if not settings.email_configured:
         return "provider_not_configured", ""
