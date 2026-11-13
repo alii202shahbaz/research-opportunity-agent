@@ -52,6 +52,7 @@ class UserProfile(Base):
     current_semester: Mapped[int | None] = mapped_column(Integer, nullable=True)
     graduation_year: Mapped[int | None] = mapped_column(Integer, nullable=True)
     citizenship: Mapped[str] = mapped_column(String(100), default="", nullable=False)
+    gender: Mapped[str] = mapped_column(String(40), default="", nullable=False)
     interests_json: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
     preferred_countries_json: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
     funding_preference: Mapped[str] = mapped_column(String(30), default="funded_only", nullable=False)
