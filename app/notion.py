@@ -414,7 +414,6 @@ def upsert_opportunity_page(db: Session, user_id: str, opp) -> str:
     connection = db.get(NotionConnection, user_id)
     if not connection or not connection.data_source_id:
         raise NotionAPIError("Create a Notion opportunities database before syncing")
-    _ensure_domain_options(_refresh_if_needed(db, connection), connection.data_source_id)
     properties = _property_payload(opp)
     if opp.notion_page_id:
         try:
@@ -459,6 +458,7 @@ def prepare_notion_sync(db: Session, user_id: str) -> NotionSyncContext | None:
     # Resolve/refresh once while the database is available. Subsequent page
     # requests use this in-memory token and do not need another DB lookup.
     token = _refresh_if_needed(db, connection)
+    _ensure_domain_options(token, connection.data_source_id)
     return NotionSyncContext(
         user_id=user_id,
         data_source_id=connection.data_source_id,
@@ -473,7 +473,6 @@ def sync_discovered_candidate(context: NotionSyncContext, candidate) -> str | No
     outage does not cause duplicate Notion rows on the next run.
     """
     source_url = str(candidate.official_source_url)
-    _ensure_domain_options(context.access_token, context.data_source_id)
     queried = _request(
         "POST",
         f"/data_sources/{context.data_source_id}/query",
