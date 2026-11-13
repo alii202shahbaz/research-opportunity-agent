@@ -330,6 +330,7 @@ function renderOpportunities(items) {
     addField(fields, "DEADLINE", item.deadline);
     addField(fields, "ELIGIBILITY", item.eligibility);
     addField(fields, "FUNDING", item.funding_type);
+    addField(fields, "FUNDING DETAILS", item.funding_details);
     addField(fields, "STIPEND", item.stipend);
     addField(fields, "TUITION", item.tuition_waiver === true ? "Provided" : item.tuition_waiver === false ? "Not provided" : "Not specified");
     addField(fields, "TRAVEL", item.travel_grant === true ? "Provided" : item.travel_grant === false ? "Not provided" : "Not specified");
