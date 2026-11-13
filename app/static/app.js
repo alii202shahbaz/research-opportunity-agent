@@ -327,6 +327,7 @@ function renderOpportunities(items) {
 
     const fields = document.createElement("div");
     fields.className = "opportunity-fields";
+    addField(fields, "DOMAIN", (item.domains || []).join(", ") || "Unclassified");
     addField(fields, "DEADLINE", item.deadline);
     addField(fields, "ELIGIBILITY", item.eligibility);
     addField(fields, "FUNDING", item.funding_type);
