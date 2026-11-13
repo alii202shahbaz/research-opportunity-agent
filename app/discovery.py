@@ -44,6 +44,7 @@ class DiscoveredOpportunity(BaseModel):
     eligibility: str = "Unknown"
     opportunity_status: str = "Unknown"
     relevance_score: float = Field(default=0.0, ge=0, le=1)
+    eligibility_details: dict = Field(default_factory=dict)
 
 
 class TavilySearch:
@@ -222,44 +223,60 @@ def _academic_level(degree: str) -> str:
 
 
 def build_queries(profile: UserProfile) -> list[str]:
+    """Build searches from the user's chosen subjects; never lead with generic scholarships."""
     interests = json.loads(profile.interests_json or "[]")
+    if not interests:
+        return []
     countries = json.loads(profile.preferred_countries_json or "[]")
     location = " ".join(countries[:3])
-    funded = "funded stipend scholarship paid travel grant accommodation"
+    funded = {
+        "funded_only": "funded stipend paid scholarship",
+        "funded_and_partial": "funded stipend scholarship",
+        "any": "research internship fellowship",
+    }.get(profile.funding_preference, "funded stipend scholarship")
     year = str(profile.intake_year)
-    season = profile.intake_season.lower() if profile.intake_season != "Any" else "(summer OR winter OR spring OR autumn)"
+    season = profile.intake_season.lower() if profile.intake_season != "Any" else "summer winter spring autumn"
     level = _academic_level(getattr(profile, "degree", ""))
-    graduation_year = getattr(profile, "graduation_year", None)
-    grad_context = f"class of {graduation_year}" if graduation_year else ""
-    year_context = getattr(profile, "current_year", "") or ""
-    semester = getattr(profile, "current_semester", None)
-    if semester:
-        suffix = "th" if 10 <= semester % 100 <= 20 else {1: "st", 2: "nd", 3: "rd"}.get(semester % 10, "th")
-        semester_context = f"{semester}{suffix} semester"
-    else:
-        semester_context = ""
-
-    # Discovery is intentionally not restricted to the user's interests.
-    # Broad programme searches cover multiple disciplines; interests are used
-    # later as a relevance signal, never as an exclusion rule.
-    queries = [
-        f'{year} {season} undergraduate research programmes internships fellowships international students {funded} {location}',
-        f'{year} {season} undergraduate summer research opportunities science humanities social sciences arts engineering {location}',
-        f'{year} {season} research experience undergraduate students international applicants stipend application deadline {location}',
-    ]
-    grouped_interests = [interests[i:i + 2] for i in range(0, min(len(interests), 15), 2)]
-    for group in grouped_interests:
-        interest_clause = " OR ".join(f'"{interest}"' for interest in group)
+    search_terms = {
+        "Information Security": [
+            '"information security"', "cybersecurity", '"cyber security"', '"network security"',
+            '"application security"', '"cloud security"', '"malware analysis"', '"digital forensics"',
+            "cryptography", '"penetration testing"', '"threat intelligence"', '"intrusion detection"',
+            '"privacy engineering"',
+        ],
+        "Computer Science": [
+            '"computer science"', '"software engineering"', '"distributed systems"',
+            '"operating systems"', "algorithms", '"programming languages"',
+        ],
+        "Artificial Intelligence": [
+            '"artificial intelligence"', '"machine learning"', '"deep learning"',
+            '"natural language processing"', '"large language models"',
+        ],
+        "Computer Vision": [
+            '"computer vision"', '"image processing"', '"medical imaging"', '"object detection"',
+        ],
+        "Computer Systems": [
+            '"computer architecture"', '"computer networks"', '"embedded systems"',
+            '"hardware acceleration"', '"operating systems"',
+        ],
+        "Data Science": ['"data science"', '"data analytics"', '"data engineering"', '"statistical learning"'],
+    }
+    requested_domains = _interest_domains(interests)
+    queries: list[str] = []
+    for domain in sorted(requested_domains):
+        terms = search_terms.get(domain, [f'"{domain}"'])
+        clauses = " OR ".join(terms[:8])
         queries.append(
-            f'({interest_clause}) {season} {year} {level} {year_context} {semester_context} '
-            f'research internship fellowship scholarship {funded} {location}'
+            f'({clauses}) {year} {season} {level} research internship fellowship '
+            f'international students {funded} {location}'.strip()
         )
-    queries.append(
-        f'{year} {season} international undergraduate research fellowship programme '
-        f'cross-disciplinary global university institute application {grad_context} {location}'
-    )
-    return list(dict.fromkeys(q.strip() for q in queries if q.strip()))[: settings.max_search_queries_per_run]
-
+    if not queries:
+        for interest in interests:
+            queries.append(
+                f'"{interest}" {year} {season} {level} research internship fellowship '
+                f'international students {funded} {location}'.strip()
+            )
+    return list(dict.fromkeys(query for query in queries if query))[:settings.max_search_queries_per_run]
 
 def _official_domain(url: str) -> bool:
     host = urlparse(url).hostname or ""
@@ -688,6 +705,96 @@ def _eligibility(text: str, profile: UserProfile) -> str:
     return "Possibly Eligible" if reasons_known else "Unknown"
 
 
+def _eligibility_breakdown(text: str, profile: UserProfile) -> dict:
+    """Extract explicit eligibility fields; unknown requirements stay unknown."""
+    low = (text or "").lower()
+    details: dict = {
+        "minimum_cgpa": None, "minimum_cgpa_scale": None, "cgpa_match": "Not stated",
+        "gender_requirement": "Not stated", "citizenship_requirement": "Not stated",
+        "eligible_nationalities": [], "degree_requirement": "Not stated",
+        "minimum_academic_year": None, "minimum_semester": None,
+        "graduation_requirement": "Not stated", "eligibility_notes": [],
+    }
+    if re.search(r"(?:women|woman|female)\s+(?:only|applicants? only)|only\s+(?:women|woman|female)", low):
+        details["gender_requirement"] = "Women only"
+    elif re.search(r"(?:men|man|male)\s+(?:only|applicants? only)|only\s+(?:men|man|male)", low):
+        details["gender_requirement"] = "Men only"
+    elif any(term in low for term in ["all genders", "regardless of gender", "any gender"]):
+        details["gender_requirement"] = "Open"
+
+    if re.search(r"(?:u\.?s\.?|united states)\s+citizens?\s+or\s+(?:u\.?s\.?|united states)\s+permanent residents?", low) or re.search(r"(?:only|must be)\s+(?:u\.?s\.?|united states)\s+citizens?", low):
+        details["citizenship_requirement"] = "US citizens or permanent residents only"
+    elif re.search(r"international (?:students|applicants)\s+(?:are\s+)?(?:eligible|welcome)|open to international applicants|all nationalities", low):
+        details["citizenship_requirement"] = "International applicants welcome"
+    elif re.search(r"international (?:students|applicants)\s+(?:are\s+)?(?:ineligible|not eligible|not accepted)", low):
+        details["citizenship_requirement"] = "International applicants excluded"
+
+    nationality_aliases = {
+        "Canadian": ["canadian citizens only", "citizens of canada only", "canadian nationals only"],
+        "United Kingdom": ["uk citizens only", "british citizens only", "citizens of the united kingdom only"],
+        "European Union": ["eu citizens only", "citizens of eu member states only", "european union citizens only"],
+        "Pakistani": ["pakistani citizens only", "citizens of pakistan only", "pakistani nationals only"],
+        "Indian": ["indian citizens only", "citizens of india only", "indian nationals only"],
+    }
+    for nationality, patterns in nationality_aliases.items():
+        if any(pattern in low for pattern in patterns):
+            details["eligible_nationalities"].append(nationality)
+    if details["eligible_nationalities"]:
+        details["citizenship_requirement"] = "Restricted to specified nationalities"
+
+    if any(term in low for term in ["undergraduate students only", "undergraduates only", "bachelor's students only", "bachelor students only"]):
+        details["degree_requirement"] = "Undergraduate only"
+    elif any(term in low for term in ["graduate students only", "master's students only", "masters students only"]):
+        details["degree_requirement"] = "Master's / graduate only"
+    elif any(term in low for term in ["phd students only", "doctoral students only", "must be a phd student"]):
+        details["degree_requirement"] = "PhD / doctoral only"
+
+    gpa = _gpa_minimum(text or "")
+    if gpa:
+        minimum, scale = gpa
+        details["minimum_cgpa"] = minimum
+        details["minimum_cgpa_scale"] = scale
+        user_gpa = getattr(profile, "cgpa", None)
+        user_scale = float(getattr(profile, "cgpa_scale", 4.0) or 4.0)
+        if user_gpa is None:
+            details["cgpa_match"] = "Profile CGPA missing"
+        elif user_scale != scale:
+            details["cgpa_match"] = "Scale mismatch"
+        elif float(user_gpa) < minimum:
+            details["cgpa_match"] = "Below requirement"
+        else:
+            details["cgpa_match"] = "Meets requirement"
+
+    year_match = re.search(
+        r"(?:at least|minimum of|must be in|currently in at least)\s+(?:the\s+)?"
+        r"(first|second|third|fourth|fifth|sixth|\d+(?:st|nd|rd|th)?)\s*(?:academic\s*)?year",
+        low,
+    )
+    if year_match:
+        details["minimum_academic_year"] = _ordinal_number(year_match.group(1))
+    semester_match = re.search(
+        r"(?:at least|minimum of|must be in|currently in at least|from)\s+(?:the\s+)?"
+        r"(first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|\d{1,2}(?:st|nd|rd|th)?)"
+        r"\s*(?:academic\s*)?(?:semester|sem)\b",
+        low,
+    )
+    if semester_match:
+        details["minimum_semester"] = _ordinal_number(semester_match.group(1))
+    grad = re.search(r"(?:expected to graduate|graduating|graduation date).{0,35}?(20\d{2})", low)
+    if grad:
+        details["graduation_requirement"] = f"Graduation year referenced: {grad.group(1)}"
+
+    notes = details["eligibility_notes"]
+    if not gpa:
+        notes.append("No explicit minimum CGPA found in the source text.")
+    if details["gender_requirement"] == "Not stated":
+        notes.append("No gender restriction was identified.")
+    if details["citizenship_requirement"] == "Not stated":
+        notes.append("Citizenship / nationality rules were not explicit in the source text.")
+    if details["degree_requirement"] == "Not stated":
+        notes.append("Degree-level restriction was not explicit in the source text.")
+    return details
+
 def extract_candidate(result: dict, profile: UserProfile) -> DiscoveredOpportunity | None:
     source_url = canonicalize_url(str(result.get("url", "")))
     if not source_url:
@@ -713,7 +820,13 @@ def extract_candidate(result: dict, profile: UserProfile) -> DiscoveredOpportuni
     domains = _infer_domains(subject_evidence, interests)
     score = _relevance(subject_evidence, interests)
     requested_domains = _interest_domains(interests)
-    if requested_domains and not (requested_domains & set(domains)) and "Interdisciplinary Research" not in domains:
+    # Hard subject gate: generic scholarship or cross-disciplinary pages are
+    # not matches unless the requested research domain is actually evidenced.
+    if requested_domains and not (requested_domains & set(domains)):
+        return None
+    if not requested_domains and not any(
+        interest.lower() in subject_evidence.lower() for interest in interests
+    ):
         return None
     if score < 0.18:
         return None
@@ -736,6 +849,7 @@ def extract_candidate(result: dict, profile: UserProfile) -> DiscoveredOpportuni
     # Do not infer nationality eligibility or a location from the user's profile.
     country = _extract_country(content)
     eligibility = _eligibility(content, profile)
+    eligibility_details = _eligibility_breakdown(content, profile)
     # Confirm the target cycle only when the year appears in intake/season
     # context; a copyright footer or unrelated date must not validate the cycle.
     cycle_text = f"{title} {content}".lower()
@@ -761,6 +875,7 @@ def extract_candidate(result: dict, profile: UserProfile) -> DiscoveredOpportuni
             application_url=chosen_application_url, official_source_url=source_url,
             verification_status=verification, intake_year=year, intake_confirmed=target_confirmed,
             eligibility=eligibility, opportunity_status=status, relevance_score=score,
+            eligibility_details=eligibility_details,
         )
     except Exception as exc:
         logger.debug("Candidate failed validation: %s", type(exc).__name__)
@@ -828,6 +943,7 @@ def persist_candidates(db: Session, user_id: str, candidates: list[DiscoveredOpp
             "application_url": str(candidate.application_url),
             "official_source_url": str(candidate.official_source_url),
             "eligibility": candidate.eligibility,
+            "eligibility_details_json": json.dumps(candidate.eligibility_details or {}),
             "verification_status": candidate.verification_status,
             "relevance_score": candidate.relevance_score,
             "intake_year": candidate.intake_year,
