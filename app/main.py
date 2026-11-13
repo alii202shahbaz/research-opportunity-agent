@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.db import SessionLocal, init_db
 from app.emailer import email_delivery_status, send_test_email, set_application_status
+from app.discovery import canonicalize_url
 from app.models import NotionConnection, OAuthState, User, UserOpportunity, UserProfile, UserSession
 from app.notion import (
     NotionAPIError,
@@ -474,6 +475,13 @@ def opportunities(context=Depends(get_current_context)):
             .order_by(UserOpportunity.deadline.is_(None), UserOpportunity.deadline.asc(), UserOpportunity.relevance_score.desc())
             .limit(500)
         ).all()
+        # Hide legacy records from social networks or generic listing sites that
+        # were saved before the source-quality filters were introduced.
+        rows = [
+            row for row in rows
+            if canonicalize_url(row.official_source_url)
+            and canonicalize_url(row.application_url)
+        ]
         return [
             OpportunityOut(
                 id=row.id, program_name=row.program_name, institution=row.institution, country=row.country,
