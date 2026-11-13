@@ -472,7 +472,8 @@ $("runNowBtn").addEventListener("click", async () => {
   try {
     const data = await api("/api/run-now", { method: "POST", body: "{}" });
     if (data.manual_cooldown_until) manualCooldownUntil = dateValueMs(data.manual_cooldown_until);
-    toast(data.message || "Discovery completed.");
+    if (data.lease_until) manualLeaseUntil = dateValueMs(data.lease_until);
+    toast(data.message || "Discovery started.");
     await refreshMe();
   } catch (err) {
     toast(err.message, true);
