@@ -89,6 +89,9 @@ def init_db() -> None:
             if name not in profile_columns:
                 connection.execute(text(f"ALTER TABLE user_profiles ADD COLUMN {name} {ddl}"))
 
+        if "eligibility_details_json" not in opportunity_columns:
+            connection.execute(text("ALTER TABLE user_opportunities ADD COLUMN eligibility_details_json TEXT NOT NULL DEFAULT '{}'"))
+
         if "application_status" not in opportunity_columns:
             connection.execute(text(
                 "ALTER TABLE user_opportunities "
