@@ -197,8 +197,8 @@ def cron_email_self_test(request: Request):
         raise HTTPException(status_code=401, detail="Unauthorized")
     if not settings.gmail_user:
         raise HTTPException(status_code=503, detail="Gmail sender address is not configured")
-    result = send_test_email(settings.gmail_user)
-    return {"ok": result == "sent", "result": result}
+    result, diagnostic = send_test_email(settings.gmail_user)
+    return {"ok": result == "sent", "result": result, "diagnostic": diagnostic}
 
 
 @app.get("/api/cron/email-probe", include_in_schema=False)
