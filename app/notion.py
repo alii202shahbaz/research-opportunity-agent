@@ -297,6 +297,15 @@ def _notion_schema() -> dict:
             {"name": "Eligible"}, {"name": "Possibly Eligible"},
             {"name": "Ineligible"}, {"name": "Unknown"},
         ]}},
+        "Minimum CGPA": {"rich_text": {}},
+        "CGPA Scale": {"number": {"format": "number"}},
+        "CGPA Match": {"rich_text": {}},
+        "Gender Requirement": {"rich_text": {}},
+        "Citizenship Requirement": {"rich_text": {}},
+        "Degree Requirement": {"rich_text": {}},
+        "Minimum Academic Year": {"number": {"format": "number"}},
+        "Minimum Semester": {"number": {"format": "number"}},
+        "Graduation Requirement": {"rich_text": {}},
         "Verification Status": {"select": {"options": [
             {"name": "Official Source"}, {"name": "Third-party Source"}, {"name": "Needs Review"},
         ]}},
@@ -379,6 +388,10 @@ def _property_payload(opp) -> dict:
     status = "Expired" if opp.opportunity_status == "Expired" else (
         "Open / Upcoming" if opp.opportunity_status == "Open / Upcoming" else "Unknown"
     )
+    raw_details = getattr(opp, "eligibility_details", None)
+    if raw_details is None:
+        raw_details = json.loads(getattr(opp, "eligibility_details_json", "{}") or "{}")
+    details = raw_details or {}
     properties = {
         "Program Name": {"title": _rt(opp.program_name)},
         "Institution": {"rich_text": _rt(opp.institution)},
@@ -393,6 +406,15 @@ def _property_payload(opp) -> dict:
         "Application URL": {"url": opp.application_url or None},
         "Official Source URL": {"url": opp.official_source_url or None},
         "Eligibility": {"select": {"name": opp.eligibility if opp.eligibility in {"Eligible", "Possibly Eligible", "Ineligible", "Unknown"} else "Unknown"}},
+        "Minimum CGPA": {"rich_text": _rt(str(details.get("minimum_cgpa")) if details.get("minimum_cgpa") is not None else "Not stated")},
+        "CGPA Scale": {"number": details.get("minimum_cgpa_scale")},
+        "CGPA Match": {"rich_text": _rt(details.get("cgpa_match", "Not stated"))},
+        "Gender Requirement": {"rich_text": _rt(details.get("gender_requirement", "Not stated"))},
+        "Citizenship Requirement": {"rich_text": _rt(details.get("citizenship_requirement", "Not stated"))},
+        "Degree Requirement": {"rich_text": _rt(details.get("degree_requirement", "Not stated"))},
+        "Minimum Academic Year": {"number": details.get("minimum_academic_year")},
+        "Minimum Semester": {"number": details.get("minimum_semester")},
+        "Graduation Requirement": {"rich_text": _rt(details.get("graduation_requirement", "Not stated"))},
         "Verification Status": {"select": {"name": verification}},
         "Relevance Score": {"number": round(float(opp.relevance_score or 0), 3)},
         "Intake Year": {"number": int(opp.intake_year)},
@@ -514,6 +536,7 @@ def sync_discovered_candidate(context: NotionSyncContext, candidate) -> str | No
         application_url=str(candidate.application_url),
         official_source_url=source_url,
         eligibility=candidate.eligibility,
+        eligibility_details=candidate.eligibility_details,
         verification_status=candidate.verification_status,
         relevance_score=candidate.relevance_score,
         intake_year=candidate.intake_year,
