@@ -556,6 +556,7 @@ def opportunities(context=Depends(get_current_context)):
                 travel_grant=row.travel_grant, housing=row.housing, deadline=row.deadline,
                 deadline_note=row.deadline_note, application_url=row.application_url,
                 official_source_url=row.official_source_url, eligibility=row.eligibility,
+                eligibility_details=json.loads(row.eligibility_details_json or "{}"),
                 verification_status=row.verification_status, relevance_score=row.relevance_score,
                 intake_year=row.intake_year, intake_confirmed=row.intake_confirmed, opportunity_status=row.opportunity_status,
                 application_status=row.application_status,
