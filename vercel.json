@@ -9,10 +9,12 @@
       "maxDuration": 300
     }
   },
-  "crons": [
-    {
+  "schedules": {
+    "oppfindagent-daily-worker": {
+      "schedule": "0 8 * * *",
+      "timezone": "Asia/Karachi",
       "path": "/api/cron/worker",
-      "schedule": "0 3 * * *"
+      "requestMethod": "GET"
     }
-  ]
+  }
 }
