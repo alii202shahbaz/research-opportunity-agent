@@ -295,37 +295,29 @@ def _extract_country(text: str) -> str:
 
 
 def _infer_institution(title: str, host: str, text: str) -> str:
-    haystack = f"{title} {text[:9000]}"
-    low = haystack.lower()
-    known = [
-        "Santa Fe Institute", "University of California, Riverside", "UC Riverside",
-        "University of California Riverside", "UCR", "University of California",
-        "EPFL", "ETH Zurich", "MIT", "Stanford University", "Carnegie Mellon University",
-        "University of Oxford", "University of Cambridge", "Max Planck Institute",
-        "CERN", "RIKEN", "KAUST", "National University of Singapore", "Nanyang Technological University",
-        "Harvard University", "Princeton University", "Yale University", "Cornell University",
-        "University of Toronto", "University of British Columbia", "University of Melbourne",
-    ]
-    for name in known:
-        if name.lower() in low:
-            if name.lower() in {"ucr", "uc riverside", "university of california riverside"}:
-                return "University of California, Riverside"
+    # Attribute only from the owning hostname or the programme title.
+    # Do not pick up a university merely mentioned somewhere in page text.
+    host = (host or "").lower().split(":")[0].removeprefix("www.")
+    known_hosts = {
+        "harvard.edu": "Harvard University", "mit.edu": "MIT",
+        "stanford.edu": "Stanford University", "princeton.edu": "Princeton University",
+        "yale.edu": "Yale University", "cornell.edu": "Cornell University",
+        "ethz.ch": "ETH Zurich", "epfl.ch": "EPFL", "santafe.edu": "Santa Fe Institute",
+    }
+    for domain, name in known_hosts.items():
+        if host == domain or host.endswith("." + domain):
             return name
-    patterns = [
+    for pattern in [
         r"\b((?:[A-Z][A-Za-z&.'-]+\s+){0,5}University\s+of\s+[A-Z][A-Za-z&.' -]{2,60})\b",
         r"\b((?:[A-Z][A-Za-z&.'-]+\s+){0,5}[A-Z][A-Za-z&.'-]+\s+University)\b",
-        r"\b((?:[A-Z][A-Za-z&.'-]+\s+){0,5}[A-Z][A-Za-z&.'-]+\s+(?:Institute|College|Laboratory))\b",
-    ]
-    for pattern in patterns:
-        match = re.search(pattern, haystack)
+        r"\b((?:[A-Z][A-Za-z&.'-]+\s+){0,5}[A-Z][A-Za-z&.'-]+\s+(?:Institute|College))\b",
+    ]:
+        match = re.search(pattern, title or "")
         if match:
-            candidate = re.sub(r"\s+", " ", match.group(1)).strip(" .,-")
-            if len(candidate) <= 90 and not candidate.lower().startswith(("the application", "the research")):
-                return candidate
-    host = (host or "").lower().split(":")[0].removeprefix("www.")
+            return re.sub(r"\s+", " ", match.group(1)).strip(" .,-")[:90]
     if _official_domain("https://" + host):
-        label = host.split(".")[0]
-        if label not in {"facebook", "instagram", "linkedin", "twitter", "tiktok", "youtube"}:
+        label = host.split(".")[-2] if len(host.split(".")) >= 2 else host
+        if label not in {"edu", "ac", "gov", "www"}:
             return label.replace("-", " ").title()
     return "Not identified"
 
@@ -605,11 +597,32 @@ def _eligibility(text: str, profile: UserProfile) -> str:
             return "Ineligible"
         reasons_known = True
 
-    if any(term in low for term in ["u.s. citizens only", "us citizens only", "must be a u.s. citizen", "must be a us citizen"]):
+    citizenship = (getattr(profile, "citizenship", "") or "").lower()
+    # A US-citizen/permanent-resident-only programme excludes international applicants.
+    us_restricted = bool(re.search(
+        r"(?:u\.?s\.?|united states)\s+citizens?\s+or\s+(?:u\.?s\.?|united states)\s+permanent residents?",
+        low,
+    )) or bool(re.search(r"(?:only|must be)\s+(?:u\.?s\.?|united states)\s+citizens?", low))
+    international_excluded = bool(re.search(
+        r"international students?\s+(?:are\s+)?ineligible|international applicants?\s+(?:are\s+)?not eligible|non[- ]?u\.?s\.? citizens?\s+(?:are\s+)?not eligible",
+        low,
+    ))
+    if us_restricted or international_excluded:
         reasons_known = True
-        citizenship = (getattr(profile, "citizenship", "") or "").lower()
-        if citizenship and not any(term in citizenship for term in ["united states", "usa", "american", "u.s."]):
+        if not any(term in citizenship for term in ["united states", "usa", "american", "u.s."]):
             return "Ineligible"
+
+    gender = (getattr(profile, "gender", "") or "").strip().lower()
+    women_only = bool(re.search(r"(?:women|woman|female)\s+(?:only|applicants? only)|only\s+(?:women|woman|female)", low))
+    men_only = bool(re.search(r"(?:men|man|male)\s+(?:only|applicants? only)|only\s+(?:men|man|male)", low))
+    if women_only:
+        reasons_known = True
+        if gender not in {"woman", "female"}:
+            return "Unknown" if not gender or gender == "prefer not to say" else "Ineligible"
+    if men_only:
+        reasons_known = True
+        if gender not in {"man", "male"}:
+            return "Unknown" if not gender or gender == "prefer not to say" else "Ineligible"
 
     gpa_requirement = _gpa_minimum(text)
     if gpa_requirement:
@@ -643,7 +656,7 @@ def _eligibility(text: str, profile: UserProfile) -> str:
         return "Possibly Eligible"
     # No explicit conflict was found. This is a preliminary screen, not a
     # guarantee; the official programme rules still need human confirmation.
-    return "Possibly Eligible" if reasons_known or not low else "Possibly Eligible"
+    return "Possibly Eligible" if reasons_known else "Unknown"
 
 
 def extract_candidate(result: dict, profile: UserProfile) -> DiscoveredOpportunity | None:
@@ -698,16 +711,11 @@ def extract_candidate(result: dict, profile: UserProfile) -> DiscoveredOpportuni
         rf"\bfor\s+(?:the\s+)?{year}\s+(?:intake|cohort)\b",
         rf"\b(?:applications?|program|internship|fellowship)\s+for\s+{year}\b",
     ])
-    chosen_application_url = canonicalize_url(discovered_apply_url or source_url)
+    chosen_application_url = canonicalize_url(discovered_apply_url or "")
     if not chosen_application_url:
         return None
     if discovered_apply_url is None:
-        parsed_source = urlparse(source_url)
-        programme_path = (parsed_source.path or "/").strip("/")
-        if not _official_domain(source_url) or not programme_path:
-            # Do not turn a general directory or an institution homepage into
-            # an application link. Third-party results need an explicit portal.
-            return None
+        return None
     try:
         return DiscoveredOpportunity(
             program_name=title[:400], institution=institution, country=country, domains=domains,
