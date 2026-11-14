@@ -651,7 +651,11 @@ def cleanup_legacy_directory_pages(context: NotionSyncContext, max_pages: int = 
             props = page.get("properties", {})
             title = _notion_property_text(props, "Program Name")
             source_url = _notion_property_text(props, "Official Source URL")
-            if not page_id or not _is_legacy_directory_record(title, source_url):
+            if (
+                not page_id
+                or title.startswith("RESOURCE — Not a specific opportunity:")
+                or not _is_legacy_directory_record(title, source_url)
+            ):
                 continue
             # Preserve Application Status and the original Official Source URL.
             # Remove only fields that made the resource page appear to be an
