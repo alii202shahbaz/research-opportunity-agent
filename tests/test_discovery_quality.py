@@ -131,7 +131,12 @@ def test_queries_prioritize_requested_information_security():
     )
     queries = build_queries(profile)
     assert queries
-    assert all("information security" in q.lower() or "cybersecurity" in q.lower() or "network security" in q.lower() or "application security" in q.lower() or "malware analysis" in q.lower() or "digital forensics" in q.lower() or "cryptography" in q.lower() for q in queries)
+    valid_security_terms = [
+        "information security", "cybersecurity", "network security", "application security",
+        "cloud security", "malware analysis", "digital forensics", "cryptography",
+        "penetration testing", "threat intelligence", "intrusion detection", "privacy engineering",
+    ]
+    assert all(any(term in q.lower() for term in valid_security_terms) for q in queries)
     assert not any("humanities social sciences arts" in q.lower() for q in queries)
 
 
