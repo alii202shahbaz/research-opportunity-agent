@@ -880,19 +880,29 @@ def _is_directory_page(title: str, source_url: str, content: str) -> bool:
     return link_count >= 18 and listing_terms >= 1
 
 
-def _markdown_apply_url(content: str, base_url: str) -> str | None:
-    pattern = re.compile(r"\[([^\]]{1,100})\]\((https?://[^)\s]+)\)", re.I)
+def _markdown_links(content: str, base_url: str) -> list[tuple[str, str]]:
+    pattern = re.compile(r"\[([^\]]{1,180})\]\((https?://[^)\s]+)\)", re.I)
+    found = []
+    seen = set()
     for match in pattern.finditer(content or ""):
-        label = re.sub(r"\s+", " ", match.group(1)).strip().lower()
-        if not re.fullmatch(
-            r"(?:apply|apply now|apply here|apply online|application|application form|"
-            r"application portal|online application|submit application|start application|"
-            r"submit your application|apply for this programme|apply for this program)",
-            label,
-        ):
-            continue
+        label = re.sub(r"\s+", " ", match.group(1)).strip()
         href = canonicalize_url(urljoin(base_url, match.group(2)))
-        if not href:
+        if not label or not href or href in seen:
+            continue
+        seen.add(href)
+        found.append((label, href))
+    return found
+
+
+def _markdown_apply_url(content: str, base_url: str) -> str | None:
+    apply_labels = {
+        "apply", "apply now", "apply here", "apply online", "application",
+        "application form", "application portal", "application link", "online application",
+        "submit application", "start application", "submit your application",
+        "apply for this programme", "apply for this program",
+    }
+    for label, href in _markdown_links(content, base_url):
+        if label.lower().strip(" .:") not in apply_labels:
             continue
         parsed = urlparse(href)
         host = (parsed.hostname or "").lower()
@@ -901,6 +911,40 @@ def _markdown_apply_url(content: str, base_url: str) -> str | None:
             continue
         return href
     return None
+
+
+def _directory_program_links(content: str, base_url: str, limit: int = 12) -> list[dict]:
+    """Expand a resource directory into distinct programme pages, never store the directory itself."""
+    generic_labels = {
+        "home", "about", "contact", "privacy policy", "terms", "read more",
+        "learn more", "click here", "here", "resources", "student resources",
+        "research opportunities", "summer research programs", "scholarships",
+        "internships", "apply", "apply now", "view all", "more information",
+    }
+    results = []
+    for label, href in _markdown_links(content, base_url):
+        clean_label = re.sub(r"\s+", " ", label).strip()
+        low = clean_label.lower().strip(" .:")
+        if low in generic_labels or len(clean_label) < 10:
+            continue
+        if _is_directory_page(clean_label, href, ""):
+            continue
+        parsed = urlparse(href)
+        path = (parsed.path or "/").strip("/")
+        if not path:
+            continue
+        # Exclude likely navigation and social-profile routes.
+        if re.search(r"/(?:about|contact|privacy|terms|news|events)(?:/|$)", "/" + path.lower()):
+            continue
+        results.append({
+            "url": href,
+            "title": clean_label[:400],
+            "description": f"Programme link discovered from directory: {clean_label}",
+            "score": 0.0,
+        })
+        if len(results) >= limit:
+            break
+    return results
 
 
 def _valid_program_title(title: str) -> bool:
@@ -1042,38 +1086,83 @@ def discover_for_profile(profile: UserProfile) -> list[DiscoveredOpportunity]:
                     item["url"] = url
                     query_results[url] = item
 
-        # Prefer result relevance, but reject known list/roundup sites before
-        # spending Extract credits. The Extract API can read pages that direct
-        # HTTP fetching blocks (403), and returns Markdown with link anchors.
         ranked = sorted(
             query_results.values(),
             key=lambda item: float(item.get("score") or 0),
             reverse=True,
         )
-        selected = [
-            item for item in ranked
-            if not _is_directory_page(str(item.get("title") or ""), str(item.get("url") or ""), str(item.get("description") or ""))
-        ][:settings.max_pages_per_run]
+        directory_pages = []
+        detail_pages = []
+        for item in ranked:
+            title = str(item.get("title") or "")
+            url = str(item.get("url") or "")
+            desc = str(item.get("description") or "")
+            if _is_directory_page(title, url, desc):
+                directory_pages.append(item)
+            else:
+                detail_pages.append(item)
 
+        # Extract some detail pages and a smaller number of directories. The
+        # latter are discovery sources only; their child links are extracted
+        # and verified as separate programme pages before any record is saved.
+        detail_budget = max(3, settings.max_pages_per_run - 3)
+        selected_detail = detail_pages[:detail_budget]
+        selected_directories = directory_pages[:min(3, settings.max_pages_per_run - len(selected_detail))]
+        selected = selected_detail + selected_directories
         extracted = {}
         try:
             extracted = searcher.extract([str(item["url"]) for item in selected])
         except httpx.HTTPError as exc:
             logger.warning("Tavily Extract batch failed (%s); trying direct page fetches", type(exc).__name__)
 
+        child_pages = []
+        selected_by_url = {str(item["url"]): item for item in selected}
         for item in selected:
-            raw = extracted.get(str(item["url"]))
+            url = str(item["url"])
+            raw = extracted.get(url)
             if raw:
                 item["raw_content"] = raw
+            if item in selected_directories and raw:
+                child_pages.extend(_directory_program_links(raw, url, limit=10))
+                continue
             candidate = extract_candidate(item, profile)
+            if candidate:
+                candidates.append(candidate)
+
+        # Follow links found inside resource lists. This is the key step the
+        # old pipeline lacked: it used to discard a directory without visiting
+        # the actual opportunities listed on it.
+        known_urls = set(selected_by_url)
+        unique_children = []
+        for child in child_pages:
+            url = canonicalize_url(str(child.get("url") or ""))
+            if url and url not in known_urls:
+                known_urls.add(url)
+                unique_children.append(child)
+        child_budget = min(12, max(0, 20 - len(selected)))
+        unique_children = unique_children[:child_budget]
+        child_extracted = {}
+        if unique_children:
+            try:
+                child_extracted = searcher.extract([str(item["url"]) for item in unique_children])
+            except httpx.HTTPError as exc:
+                logger.warning("Tavily programme-link extraction failed (%s)", type(exc).__name__)
+        for child in unique_children:
+            raw = child_extracted.get(str(child["url"]))
+            if raw:
+                child["raw_content"] = raw
+            candidate = extract_candidate(child, profile)
             if candidate:
                 candidates.append(candidate)
 
     finally:
         searcher.close()
+
     unique: dict[str, DiscoveredOpportunity] = {}
     for item in candidates:
-        key = canonicalize_url(str(item.application_url))
+        # Programme pages may list the same application form under different
+        # university pages; dedupe on the canonical programme source first.
+        key = canonicalize_url(str(item.official_source_url))
         if key and (key not in unique or item.relevance_score > unique[key].relevance_score):
             unique[key] = item
     return sorted(unique.values(), key=lambda item: item.relevance_score, reverse=True)
