@@ -14,7 +14,7 @@ from app.db import SessionLocal
 from app.discovery import canonicalize_url, discover_for_profile, persist_candidates
 from app.emailer import refresh_application_statuses, send_deadline_digest, send_recovery_digest
 from app.models import NotionConnection, UserOpportunity, UserProfile
-from app.notion import (NotionAPIError, prepare_notion_sync, sync_discovered_candidate, trash_notion_page, upsert_opportunity_page)
+from app.notion import (NotionAPIError, cleanup_legacy_directory_pages, prepare_notion_sync, sync_discovered_candidate, trash_notion_page, upsert_opportunity_page)
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -102,8 +102,16 @@ def process_user(user_id: str) -> None:
         ) <= now)
         manual_requested = profile.manual_run_requested
         notion_prepare_error = False
+        directory_pages_flagged = 0
         try:
             notion_context = prepare_notion_sync(db, user_id)
+            if notion_context:
+                directory_pages_flagged = cleanup_legacy_directory_pages(notion_context)
+                if directory_pages_flagged:
+                    logger.warning(
+                        "Flagged %s legacy directory/resource pages in Notion for user %s",
+                        directory_pages_flagged, user_id[:8],
+                    )
         except NotionAPIError as exc:
             notion_prepare_error = True
             logger.warning("Could not prepare Notion sync for user %s (%s)", user_id[:8], str(exc))
@@ -192,7 +200,7 @@ def process_user(user_id: str) -> None:
         profile.last_run_status = "partial" if sync_errors else "success"
         profile.last_run_summary = (
             f"{len(candidates)} candidates; {inserted} new; {updated} updated; "
-            f"{synced + notion_direct_synced} Notion rows synced; {notion_sync_state}; {sync_errors} sync errors; "
+            f"{synced + notion_direct_synced} Notion rows synced; {directory_pages_flagged} legacy directory rows flagged; {notion_sync_state}; {sync_errors} sync errors; "
             f"{expired_count} deadlines passed; {archived_count} old opportunities archived; "
             f"email digest: {email_result}"
         )[:500]
