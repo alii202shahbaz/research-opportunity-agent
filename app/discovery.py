@@ -710,8 +710,8 @@ def _eligibility(text: str, profile: UserProfile) -> str:
             return "Ineligible"
 
     gender = (getattr(profile, "gender", "") or "").strip().lower()
-    women_only = bool(re.search(r"(?:women|woman|female)\s+(?:only|applicants? only)|only\s+(?:women|woman|female)", low))
-    men_only = bool(re.search(r"(?:men|man|male)\s+(?:only|applicants? only)|only\s+(?:men|man|male)", low))
+    women_only = bool(re.search(r"\b(?:women|woman|female)\b\s+(?:only|applicants? only)|only\s+\b(?:women|woman|female)\b", low))
+    men_only = bool(re.search(r"\b(?:men|man|male)\b\s+(?:only|applicants? only)|only\s+\b(?:men|man|male)\b", low))
     if women_only:
         reasons_known = True
         if gender not in {"woman", "female"}:
