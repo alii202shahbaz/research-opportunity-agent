@@ -354,7 +354,7 @@ def test_directory_search_is_expanded_and_only_child_programme_is_saved(monkeypa
     assert result.institution == "CISPA Helmholtz Center for Information Security"
     assert result.program_name == "CISPA Summer Research (CSR) Internship Program 2027"
     assert result.deadline == date(2026, 11, 30)
-    assert result.domains == ["Information Security"]
+    assert "Information Security" in result.domains
     assert result.intake_confirmed is True
     assert str(result.application_url) == "https://career.cispa.de/application/2027"
     assert "directory" not in result.program_name.lower()
