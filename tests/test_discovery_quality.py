@@ -264,3 +264,20 @@ def test_information_security_child_page_produces_specific_candidate():
     assert str(result.deadline) == "2027-01-13"
     assert result.eligibility == "Possibly Eligible"
     assert str(result.application_url) == "https://apply.rutgers.edu/research/malware-2027"
+
+
+def test_cispa_is_recognized_as_an_official_research_institution():
+    from app.discovery import _official_domain, _infer_institution
+
+    assert _official_domain("https://career.cispa.de/internship")
+    assert _infer_institution("CISPA Summer Research Internship Program", "career.cispa.de", "") == "CISPA Helmholtz Center for Information Security"
+
+
+def test_specific_cispa_programme_is_not_treated_as_a_directory():
+    from app.discovery import _is_directory_page
+
+    assert not _is_directory_page(
+        "CISPA Summer Research Internship Program",
+        "https://career.cispa.de/internship",
+        "Paid BSc/MSc research internship in computer security, privacy and AI.",
+    )
