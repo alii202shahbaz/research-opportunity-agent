@@ -105,16 +105,22 @@ def process_user(user_id: str) -> None:
         directory_pages_flagged = 0
         try:
             notion_context = prepare_notion_sync(db, user_id)
-            if notion_context:
+        except NotionAPIError as exc:
+            notion_prepare_error = True
+            logger.warning("Could not prepare Notion sync for user %s (%s)", user_id[:8], str(exc))
+        if notion_context:
+            try:
                 directory_pages_flagged = cleanup_legacy_directory_pages(notion_context)
                 if directory_pages_flagged:
                     logger.warning(
                         "Flagged %s legacy directory/resource pages in Notion for user %s",
                         directory_pages_flagged, user_id[:8],
                     )
-        except NotionAPIError as exc:
-            notion_prepare_error = True
-            logger.warning("Could not prepare Notion sync for user %s (%s)", user_id[:8], str(exc))
+            except NotionAPIError as exc:
+                logger.warning(
+                    "Legacy Notion directory cleanup failed for user %s (%s); continuing normal sync",
+                    user_id[:8], type(exc).__name__,
+                )
 
         candidates = discover_for_profile(profile) if (profile.automation_enabled or manual_requested) else []
         local_today = now.astimezone(ZoneInfo(profile.timezone_name or "UTC")).date()
