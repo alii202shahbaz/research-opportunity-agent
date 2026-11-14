@@ -152,3 +152,110 @@ def test_eligibility_breakdown_extracts_gpa_gender_and_degree():
     assert details["gender_requirement"] == "Women only"
     assert details["degree_requirement"] == "Undergraduate only"
     assert details["citizenship_requirement"] == "International applicants welcome"
+
+
+def test_us_citizenship_and_permanent_resident_only_rejects_pakistani_applicant():
+    from types import SimpleNamespace
+    from app.discovery import _eligibility
+
+    profile = SimpleNamespace(
+        degree="Bachelor of Science",
+        current_year="Third year",
+        current_semester=5,
+        graduation_year=2028,
+        citizenship="Pakistan",
+        gender="Man",
+        cgpa=3.5,
+        cgpa_scale=4.0,
+    )
+    text = (
+        "Applicants must be U.S. citizens or U.S. permanent residents. "
+        "International students are ineligible."
+    )
+    assert _eligibility(text, profile) == "Ineligible"
+
+
+def test_women_only_programme_rejects_man_and_is_unknown_without_gender():
+    from types import SimpleNamespace
+    from app.discovery import _eligibility
+
+    base = dict(
+        degree="Bachelor of Science", current_year="Third year",
+        current_semester=5, graduation_year=2028, citizenship="Pakistan",
+        cgpa=3.5, cgpa_scale=4.0,
+    )
+    assert _eligibility("Women applicants only.", SimpleNamespace(**base, gender="Man")) == "Ineligible"
+    assert _eligibility("Women applicants only.", SimpleNamespace(**base, gender="")) == "Unknown"
+    assert _eligibility("Women applicants only.", SimpleNamespace(**base, gender="Woman")) == "Possibly Eligible"
+
+
+def test_directory_roundup_is_rejected_not_saved_as_a_programme():
+    from app.discovery import _is_directory_page, _valid_program_title
+
+    title = "Scholarships & Grants for Your Internship Abroad (2026) | Go Overseas"
+    url = "https://www.gooverseas.com/blog/internship-abroad-scholarships-grants"
+    assert _is_directory_page(title, url, "A scholarship roundup page with many listings.")
+    assert not _valid_program_title(title)
+
+
+def test_directory_links_expand_to_specific_programme_pages():
+    from app.discovery import _directory_program_links
+
+    markdown = (
+        "# Undergraduate Cybersecurity Research\n"
+        "[University Malware Research Fellowship](https://security.example.edu/reu/malware)\n"
+        "[Apply Now](https://apply.example.edu/forms/123)\n"
+        "[Student Resources](https://security.example.edu/resources)\n"
+    )
+    links = _directory_program_links(markdown, "https://directory.example.org/research", limit=10)
+    assert len(links) == 1
+    assert links[0]["title"] == "University Malware Research Fellowship"
+    assert links[0]["url"] == "https://security.example.edu/reu/malware"
+
+
+def test_markdown_application_link_is_specific_and_canonical():
+    from app.discovery import _markdown_apply_url
+
+    markdown = (
+        "# Malware Research Fellowship\n"
+        "[Programme details](https://security.example.edu/reu/malware)\n"
+        "[Apply Now](https://apply.example.edu/forms/2027?utm_source=directory)\n"
+    )
+    assert _markdown_apply_url(markdown, "https://security.example.edu/reu/malware") == "https://apply.example.edu/forms/2027"
+
+
+def test_information_security_child_page_produces_specific_candidate():
+    import json
+    from types import SimpleNamespace
+    from app.discovery import extract_candidate
+
+    profile = SimpleNamespace(
+        intake_year=2027, intake_season="Summer",
+        interests_json=json.dumps(["Information Security"]),
+        preferred_countries_json=json.dumps(["Worldwide"]),
+        funding_preference="funded_only",
+        degree="Bachelor of Science", current_year="3rd year",
+        current_semester=5, graduation_year=2028,
+        citizenship="Pakistan", gender="Man", cgpa=3.5, cgpa_scale=4.0,
+    )
+    raw = (
+        "# Summer 2027 Undergraduate Malware Analysis Research Fellowship\n"
+        "This is a specific undergraduate research fellowship in information security and malware analysis. "
+        "The program offers a fully funded summer research placement and a monthly stipend. "
+        "Applications are open to international applicants. The application deadline is January 13, 2027. "
+        "Undergraduate students may apply for the Summer 2027 cohort. "
+        "[Apply Now](https://apply.rutgers.edu/research/malware-2027)\n"
+    )
+    result = extract_candidate({
+        "url": "https://www.rutgers.edu/research/malware-fellowship-2027",
+        "title": "Summer 2027 Undergraduate Malware Analysis Research Fellowship",
+        "description": "Undergraduate malware analysis research fellowship.",
+        "raw_content": raw,
+        "score": 0.9,
+    }, profile)
+    assert result is not None
+    assert result.institution == "Rutgers"
+    assert "Information Security" in result.domains
+    assert str(result.deadline) == "2027-01-13"
+    assert result.eligibility == "Possibly Eligible"
+    assert str(result.application_url) == "https://apply.rutgers.edu/research/malware-2027"
