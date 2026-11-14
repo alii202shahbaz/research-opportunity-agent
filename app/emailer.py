@@ -185,7 +185,13 @@ def probe_email_transport() -> dict:
             route["stage"] = stage
             route["error_type"] = type(exc).__name__
             outcomes.append(route)
-    return {"configured": True, "host": host, "result": "failed", "routes": outcomes}
+    return {
+        "configured": True,
+        "host": host,
+        "result": "failed",
+        "app_password_shape_valid": len((settings.gmail_app_password or "").replace(" ", "")) == 16,
+        "routes": outcomes,
+    }
 
 def send_test_email(recipient: str) -> tuple[str, str]:
     payload = {
@@ -212,7 +218,18 @@ def send_test_email(recipient: str) -> tuple[str, str]:
         return "recipient_rejected", "Gmail rejected the recipient address."
     except SMTPTransportUnavailable as exc:
         detail = str(exc)[:300]
-        logger.warning("All Gmail SMTP routes failed (%s)", detail)
+        auth_drops = [
+            (port, error) for port, stage, error in exc.failures
+            if stage == "authentication" and error == "SMTPServerDisconnected"
+        ]
+        if auth_drops and len(auth_drops) == len(exc.failures):
+            detail = (
+                "Gmail accepted the TCP/TLS connection but closed the session during AUTH on both ports. "
+                "Verify the App Password was generated while signed into the exact sender account "
+                f"({settings.gmail_user}); check whether Google Workspace/security policy blocks App Password SMTP. "
+                "Do not use the normal Google account password."
+            )
+        logger.warning("All Gmail SMTP routes failed (%s)", str(exc)[:160])
         return "connection_failed", detail
     except (smtplib.SMTPConnectError, smtplib.SMTPServerDisconnected, ssl.SSLError, TimeoutError, OSError) as exc:
         logger.warning("Test email SMTP connection failed (%s)", type(exc).__name__)
