@@ -49,24 +49,18 @@ class DiscoveredOpportunity(BaseModel):
 
 class TavilySearch:
     ENDPOINT = "https://api.tavily.com/search"
+    EXTRACT_ENDPOINT = "https://api.tavily.com/extract"
 
     def __init__(self, api_key: str):
         self.api_key = api_key
-        self.client = httpx.Client(timeout=httpx.Timeout(20.0, connect=7.0), follow_redirects=False)
+        self.client = httpx.Client(timeout=httpx.Timeout(35.0, connect=8.0), follow_redirects=False)
 
-    def search(self, query: str, count: int = 8) -> list[dict]:
+    def _post_with_retry(self, endpoint: str, payload: dict) -> dict:
         response = None
         for attempt in range(4):
             response = self.client.post(
-                self.ENDPOINT,
-                json={
-                    "query": query,
-                    "max_results": max(1, min(20, count)),
-                    "search_depth": "basic",
-                    "topic": "general",
-                    "include_answer": False,
-                    "include_raw_content": False,
-                },
+                endpoint,
+                json=payload,
                 headers={
                     "Authorization": f"Bearer {self.api_key}",
                     "Content-Type": "application/json",
@@ -75,19 +69,51 @@ class TavilySearch:
             )
             if response.status_code not in {429, 500, 502, 503, 504, 529} or attempt == 3:
                 break
-            time.sleep(min(8.0, 0.75 * (2 ** attempt)))
+            time.sleep(min(6.0, 0.6 * (2 ** attempt)))
         response.raise_for_status()
-        results = response.json().get("results", [])
-        # The discovery pipeline consumes a search-engine neutral shape.
+        return response.json()
+
+    def search(self, query: str, count: int = 8) -> list[dict]:
+        data = self._post_with_retry(self.ENDPOINT, {
+            "query": query,
+            "max_results": max(1, min(20, count)),
+            "search_depth": "advanced",
+            "topic": "general",
+            "include_answer": False,
+            "include_raw_content": False,
+        })
         return [
             {
                 "url": item.get("url", ""),
                 "title": item.get("title", ""),
                 "description": item.get("content", ""),
+                "score": float(item.get("score") or 0),
+                "published_date": item.get("published_date"),
             }
-            for item in results
+            for item in data.get("results", [])
             if item.get("url")
         ]
+
+    def extract(self, urls: list[str]) -> dict[str, str]:
+        """Fetch readable Markdown for selected search results, including JS-heavy pages."""
+        unique = list(dict.fromkeys(url for url in urls if url))[:20]
+        if not unique:
+            return {}
+        data = self._post_with_retry(self.EXTRACT_ENDPOINT, {
+            "urls": unique,
+            "extract_depth": "advanced",
+            "format": "markdown",
+            "include_images": False,
+        })
+        extracted = {}
+        for item in data.get("results", []):
+            url = canonicalize_url(str(item.get("url") or ""))
+            raw = item.get("raw_content") or item.get("content") or ""
+            if url and raw:
+                extracted[url] = str(raw)[:35_000]
+        for item in data.get("failed_results", []):
+            logger.info("Tavily extraction failed for %s", canonicalize_url(str(item.get("url") or "")))
+        return extracted
 
     def close(self) -> None:
         self.client.close()
@@ -223,26 +249,28 @@ def _academic_level(degree: str) -> str:
 
 
 def build_queries(profile: UserProfile) -> list[str]:
-    """Build searches from the user's chosen subjects; never lead with generic scholarships."""
+    """Build several precise search intents instead of one diluted OR query."""
     interests = json.loads(profile.interests_json or "[]")
     if not interests:
         return []
     countries = json.loads(profile.preferred_countries_json or "[]")
     location = " ".join(countries[:3])
     funded = {
-        "funded_only": "funded stipend paid scholarship",
+        "funded_only": "stipend funded paid",
         "funded_and_partial": "funded stipend scholarship",
         "any": "research internship fellowship",
-    }.get(profile.funding_preference, "funded stipend scholarship")
+    }.get(profile.funding_preference, "research internship fellowship")
     year = str(profile.intake_year)
     season = profile.intake_season.lower() if profile.intake_season != "Any" else "summer winter spring autumn"
     level = _academic_level(getattr(profile, "degree", ""))
+
+    requested_domains = _interest_domains(interests)
     search_terms = {
         "Information Security": [
-            '"information security"', "cybersecurity", '"cyber security"', '"network security"',
-            '"application security"', '"cloud security"', '"malware analysis"', '"digital forensics"',
-            "cryptography", '"penetration testing"', '"threat intelligence"', '"intrusion detection"',
-            '"privacy engineering"',
+            '"information security"', "cybersecurity", '"network security"',
+            '"application security"', '"cloud security"', '"malware analysis"',
+            '"digital forensics"', "cryptography", '"penetration testing"',
+            '"threat intelligence"', '"intrusion detection"', '"privacy engineering"',
         ],
         "Computer Science": [
             '"computer science"', '"software engineering"', '"distributed systems"',
@@ -261,21 +289,35 @@ def build_queries(profile: UserProfile) -> list[str]:
         ],
         "Data Science": ['"data science"', '"data analytics"', '"data engineering"', '"statistical learning"'],
     }
-    requested_domains = _interest_domains(interests)
+
     queries: list[str] = []
     for domain in sorted(requested_domains):
         terms = search_terms.get(domain, [f'"{domain}"'])
-        clauses = " OR ".join(terms[:8])
-        queries.append(
-            f'({clauses}) {year} {season} {level} research internship fellowship '
-            f'international students {funded} {location}'.strip()
-        )
+        # Split specialist terms into focused sets. A single huge OR query
+        # tends to retrieve scholarship directories rather than programmes.
+        groups = [terms[i:i + 4] for i in range(0, min(len(terms), 12), 4)]
+        for group in groups:
+            clause = " OR ".join(group)
+            queries.append(
+                f'({clause}) {year} {season} undergraduate research internship fellowship '
+                f'international applicants {funded} {location}'.strip()
+            )
+
     if not queries:
-        for interest in interests:
+        for interest in interests[:8]:
             queries.append(
                 f'"{interest}" {year} {season} {level} research internship fellowship '
                 f'international students {funded} {location}'.strip()
             )
+
+    # Make sure a few results target actual research placements, not generic
+    # scholarship roundups. These are still restricted to the requested field.
+    domain_phrase = " OR ".join(f'"{item}"' for item in interests[:4])
+    if domain_phrase:
+        queries.append(
+            f'({domain_phrase}) undergraduate summer research assistant internship '
+            f'{year} application deadline international students {location}'.strip()
+        )
     return list(dict.fromkeys(query for query in queries if query))[:settings.max_search_queries_per_run]
 
 def _official_domain(url: str) -> bool:
@@ -319,6 +361,11 @@ def _infer_institution(title: str, host: str, text: str) -> str:
         "harvard.edu": "Harvard University", "mit.edu": "MIT",
         "stanford.edu": "Stanford University", "princeton.edu": "Princeton University",
         "yale.edu": "Yale University", "cornell.edu": "Cornell University",
+        "duke.edu": "Duke University", "berkeley.edu": "University of California, Berkeley",
+        "ucr.edu": "University of California, Riverside", "ucla.edu": "University of California, Los Angeles",
+        "ucsd.edu": "University of California, San Diego", "cmu.edu": "Carnegie Mellon University",
+        "gatech.edu": "Georgia Institute of Technology", "illinois.edu": "University of Illinois Urbana-Champaign",
+        "ox.ac.uk": "University of Oxford", "cam.ac.uk": "University of Cambridge",
         "ethz.ch": "ETH Zurich", "epfl.ch": "EPFL", "santafe.edu": "Santa Fe Institute",
     }
     for domain, name in known_hosts.items():
@@ -514,19 +561,23 @@ def _funding(text: str) -> tuple[str, str, str, bool | None, bool | None, str]:
 
 def _relevance(text: str, interests: list[str]) -> float:
     low = (text or "").lower()
-    matches = sum(1 for interest in interests if interest.lower() in low)
+    exact_matches = sum(1 for interest in interests if interest.lower() in low)
+    requested_domains = _interest_domains(interests)
+    detected_domains = set(_infer_domains(text))
+    domain_matches = len(requested_domains & detected_domains)
     programme_signals = [
         "undergraduate research", "research experience", "research internship",
         "summer research", "research fellowship", "student researcher",
         "undergraduate students", "research programme", "research program",
+        "research assistantship", "research placement",
     ]
     programme_hits = sum(1 for term in programme_signals if term in low)
     funding_hits = sum(1 for term in ["stipend", "fully funded", "scholarship", "travel grant", "housing"] if term in low)
-    # Every genuine research programme gets a base score. User interests
-    # improve ranking but cannot suppress other disciplines.
-    score = 0.22 + min(0.36, programme_hits * 0.06) + min(0.18, funding_hits * 0.03)
-    if interests:
-        score += min(0.24, 0.24 * matches / len(interests))
+    score = 0.12 + min(0.36, programme_hits * 0.06) + min(0.12, funding_hits * 0.03)
+    if requested_domains:
+        score += min(0.32, 0.32 * domain_matches / len(requested_domains))
+    elif interests:
+        score += min(0.24, 0.24 * exact_matches / len(interests))
     return round(min(1.0, score), 3)
 
 
@@ -795,17 +846,103 @@ def _eligibility_breakdown(text: str, profile: UserProfile) -> dict:
         notes.append("Degree-level restriction was not explicit in the source text.")
     return details
 
+DIRECTORY_HOSTS = {
+    "gooverseas.com", "opportunitynest.org", "opportunitiesforyouth.org",
+    "scholarshipbob.com", "scholarshipregion.com", "ciee.org", "cur.org",
+    "opportunitiescorners.com", "opportunitiesforafricans.com",
+    "scholarshiproar.com", "scholarshippositions.com", "fullyfundedscholarships.com",
+}
+DIRECTORY_TITLE_PATTERNS = [
+    r"scholarships?\s*[&and]+\s*grants?\s+for\s+your\s+internship",
+    r"summer research program resources",
+    r"internship and research opportunities",
+    r"non[- ]?[a-z]+ research opportunities",
+    r"scholarship (?:directory|roundup|database|list)",
+    r"list of (?:summer )?research opportunities",
+    r"research opportunities (?:and|&) resources",
+    r"student resources",
+]
+
+
+def _is_directory_page(title: str, source_url: str, content: str) -> bool:
+    host = (urlparse(source_url).hostname or "").lower().removeprefix("www.")
+    if any(host == item or host.endswith("." + item) for item in DIRECTORY_HOSTS):
+        return True
+    title_low = re.sub(r"\s+", " ", title or "").lower()
+    if any(re.search(pattern, title_low, re.I) for pattern in DIRECTORY_TITLE_PATTERNS):
+        return True
+    link_count = len(re.findall(r"\[[^\]]{2,100}\]\(https?://", content or ""))
+    listing_terms = sum(term in (content or "").lower() for term in [
+        "browse the following", "list of opportunities", "see the full list",
+        "explore more opportunities", "various summer research programs",
+        "other universities offer", "opportunities listed below",
+    ])
+    return link_count >= 18 and listing_terms >= 1
+
+
+def _markdown_apply_url(content: str, base_url: str) -> str | None:
+    pattern = re.compile(r"\[([^\]]{1,100})\]\((https?://[^)\s]+)\)", re.I)
+    for match in pattern.finditer(content or ""):
+        label = re.sub(r"\s+", " ", match.group(1)).strip().lower()
+        if not re.fullmatch(
+            r"(?:apply|apply now|apply here|apply online|application|application form|"
+            r"application portal|online application|submit application|start application|"
+            r"submit your application|apply for this programme|apply for this program)",
+            label,
+        ):
+            continue
+        href = canonicalize_url(urljoin(base_url, match.group(2)))
+        if not href:
+            continue
+        parsed = urlparse(href)
+        host = (parsed.hostname or "").lower()
+        path = (parsed.path or "/").strip("/")
+        if not path and not host.startswith(("apply.", "admissions.", "forms.")):
+            continue
+        return href
+    return None
+
+
+def _valid_program_title(title: str) -> bool:
+    value = re.sub(r"\s+", " ", (title or "")).strip()
+    if len(value) < 8:
+        return False
+    if _is_directory_page(value, "https://example.edu/program", ""):
+        return False
+    lower = value.lower()
+    if lower in {"research opportunities", "summer research programs", "scholarships", "internships"}:
+        return False
+    # Remove publisher suffixes such as "| Go Overseas", but don't substitute
+    # the publisher name for the actual programme.
+    if " | " in value:
+        value = value.split(" | ", 1)[0].strip()
+    if len(value) < 8:
+        return False
+    return True
+
+
 def extract_candidate(result: dict, profile: UserProfile) -> DiscoveredOpportunity | None:
     source_url = canonicalize_url(str(result.get("url", "")))
     if not source_url:
         return None
-    page = fetch_page(source_url)
-    if page:
-        page_title, text, discovered_apply_url = page
+    search_title = str(result.get("title", "") or "")
+    raw_content = str(result.get("raw_content", "") or "")
+    if raw_content:
+        page_title = search_title
+        text = raw_content
+        discovered_apply_url = _markdown_apply_url(raw_content, source_url)
     else:
-        page_title, text, discovered_apply_url = str(result.get("title", "")), str(result.get("description", "")), None
-    title = page_title or str(result.get("title", "Research opportunity"))
+        page = fetch_page(source_url)
+        if page:
+            page_title, text, discovered_apply_url = page
+        else:
+            page_title, text, discovered_apply_url = search_title, str(result.get("description", "")), None
+    title = (page_title or search_title or "Research opportunity").split(" | ", 1)[0].strip()
     content = (str(result.get("description", "")) + "\n" + text)[:35_000]
+    if len(content.strip()) < 250 or _is_directory_page(title, source_url, content):
+        return None
+    if not _valid_program_title(title):
+        return None
     low = content.lower()
     year = profile.intake_year
     # Avoid unrelated content when the page explicitly names a different intake year.
@@ -887,33 +1024,59 @@ def discover_for_profile(profile: UserProfile) -> list[DiscoveredOpportunity]:
         logger.warning("Discovery skipped: TAVILY_API_KEY is not configured")
         return []
     searcher = TavilySearch(settings.tavily_api_key)
-    seen_urls: set[str] = set()
     candidates: list[DiscoveredOpportunity] = []
-    queries = build_queries(profile)
-    pages_fetched = 0
+    query_results: dict[str, dict] = {}
     try:
-        for query in queries:
-            if pages_fetched >= settings.max_pages_per_run:
-                break
+        for query in build_queries(profile):
             try:
                 results = searcher.search(query, count=settings.search_results_per_query)
             except httpx.HTTPError as exc:
-                logger.warning("Search request failed (%s)", type(exc).__name__)
+                logger.warning("Tavily search failed (%s)", type(exc).__name__)
                 continue
-            for result in results:
-                url = canonicalize_url(str(result.get("url", "")))
-                if not url or url in seen_urls or pages_fetched >= settings.max_pages_per_run:
+            for item in results:
+                url = canonicalize_url(str(item.get("url", "")))
+                if not url:
                     continue
-                seen_urls.add(url)
-                pages_fetched += 1
-                candidate = extract_candidate(result, profile)
-                if candidate:
-                    candidates.append(candidate)
-                time.sleep(0.35)
-            time.sleep(0.8)
+                existing = query_results.get(url)
+                if existing is None or float(item.get("score") or 0) > float(existing.get("score") or 0):
+                    item["url"] = url
+                    query_results[url] = item
+
+        # Prefer result relevance, but reject known list/roundup sites before
+        # spending Extract credits. The Extract API can read pages that direct
+        # HTTP fetching blocks (403), and returns Markdown with link anchors.
+        ranked = sorted(
+            query_results.values(),
+            key=lambda item: float(item.get("score") or 0),
+            reverse=True,
+        )
+        selected = [
+            item for item in ranked
+            if not _is_directory_page(str(item.get("title") or ""), str(item.get("url") or ""), str(item.get("description") or ""))
+        ][:settings.max_pages_per_run]
+
+        extracted = {}
+        try:
+            extracted = searcher.extract([str(item["url"]) for item in selected])
+        except httpx.HTTPError as exc:
+            logger.warning("Tavily Extract batch failed (%s); trying direct page fetches", type(exc).__name__)
+
+        for item in selected:
+            raw = extracted.get(str(item["url"]))
+            if raw:
+                item["raw_content"] = raw
+            candidate = extract_candidate(item, profile)
+            if candidate:
+                candidates.append(candidate)
+
     finally:
         searcher.close()
-    return sorted(candidates, key=lambda item: item.relevance_score, reverse=True)
+    unique: dict[str, DiscoveredOpportunity] = {}
+    for item in candidates:
+        key = canonicalize_url(str(item.application_url))
+        if key and (key not in unique or item.relevance_score > unique[key].relevance_score):
+            unique[key] = item
+    return sorted(unique.values(), key=lambda item: item.relevance_score, reverse=True)
 
 
 def persist_candidates(db: Session, user_id: str, candidates: list[DiscoveredOpportunity]) -> tuple[int, int]:
