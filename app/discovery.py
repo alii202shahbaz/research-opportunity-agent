@@ -321,8 +321,11 @@ def build_queries(profile: UserProfile) -> list[str]:
     return list(dict.fromkeys(query for query in queries if query))[:settings.max_search_queries_per_run]
 
 def _official_domain(url: str) -> bool:
-    host = urlparse(url).hostname or ""
-    parts = host.lower().split(".")
+    host = (urlparse(url).hostname or "").lower().removeprefix("www.")
+    trusted_research_hosts = {"cispa.de"}
+    if any(host == item or host.endswith("." + item) for item in trusted_research_hosts):
+        return True
+    parts = host.split(".")
     return host.endswith((".edu", ".gov", ".ac.uk", ".edu.au", ".ac.nz", ".edu.cn")) or any(
         part in {"edu", "ac", "gov"} for part in parts[:-1]
     )
@@ -358,6 +361,7 @@ def _infer_institution(title: str, host: str, text: str) -> str:
     # Do not pick up a university merely mentioned somewhere in page text.
     host = (host or "").lower().split(":")[0].removeprefix("www.")
     known_hosts = {
+        "cispa.de": "CISPA Helmholtz Center for Information Security",
         "harvard.edu": "Harvard University", "mit.edu": "MIT",
         "stanford.edu": "Stanford University", "princeton.edu": "Princeton University",
         "yale.edu": "Yale University", "cornell.edu": "Cornell University",
