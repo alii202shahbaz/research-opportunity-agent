@@ -201,6 +201,60 @@ def cron_email_self_test(request: Request):
     return {"ok": result == "sent", "result": result, "diagnostic": diagnostic}
 
 
+@app.get("/api/cron/discovery-smoke-test", include_in_schema=False)
+def discovery_smoke_test(request: Request):
+    """Run a non-persisting production discovery test for Information Security."""
+    if not settings.cron_secret:
+        raise HTTPException(status_code=503, detail="Discovery diagnostic is not configured")
+    supplied = request.headers.get("authorization", "")
+    if not hmac.compare_digest(supplied, f"Bearer {settings.cron_secret}"):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    from types import SimpleNamespace
+    from app.discovery import build_queries, discover_for_profile
+
+    profile = SimpleNamespace(
+        intake_year=2027,
+        intake_season="Summer",
+        interests_json=json.dumps(["Information Security"]),
+        preferred_countries_json=json.dumps(["Worldwide"]),
+        funding_preference="any",
+        degree="Bachelor of Science",
+        current_year="3rd year",
+        current_semester=5,
+        graduation_year=2028,
+        citizenship="Pakistan",
+        gender="Man",
+        cgpa=None,
+        cgpa_scale=4.0,
+    )
+    started = time.monotonic()
+    queries = build_queries(profile)
+    candidates = discover_for_profile(profile)
+    return {
+        "ok": True,
+        "elapsed_seconds": round(time.monotonic() - started, 1),
+        "query_count": len(queries),
+        "candidate_count": len(candidates),
+        "candidates": [
+            {
+                "program_name": item.program_name,
+                "institution": item.institution,
+                "country": item.country,
+                "domains": item.domains,
+                "deadline": item.deadline.isoformat() if item.deadline else None,
+                "eligibility": item.eligibility,
+                "funding_type": item.funding_type,
+                "application_url": str(item.application_url),
+                "official_source_url": str(item.official_source_url),
+                "verification_status": item.verification_status,
+                "intake_confirmed": item.intake_confirmed,
+            }
+            for item in candidates[:10]
+        ],
+    }
+
+
 @app.get("/api/cron/email-probe", include_in_schema=False)
 def cron_email_probe(request: Request):
     """Cron-secret protected SMTP reachability and authentication diagnostic."""
