@@ -281,3 +281,131 @@ def test_specific_cispa_programme_is_not_treated_as_a_directory():
         "https://career.cispa.de/internship",
         "Paid BSc/MSc research internship in computer security, privacy and AI.",
     )
+
+
+def test_directory_search_is_expanded_and_only_child_programme_is_saved(monkeypatch):
+    import json
+    from types import SimpleNamespace
+    import app.discovery as discovery
+
+    directory_url = "https://www.ciee.org/go-abroad/research-opportunities"
+    programme_url = "https://career.cispa.de/internship"
+    directory_markdown = (
+        "# Research opportunities and resources\\n"
+        "[CISPA Summer Research (CSR) Internship Program 2027](https://career.cispa.de/internship)\\n"
+        "[Apply Now](https://career.cispa.de/application)\\n"
+    )
+    programme_markdown = (
+        "# CISPA Summer Research (CSR) Internship Program\\n"
+        "The Summer 2027 programme offers BSc and MSc students a paid 2-3 month "
+        "research internship in information security, computer security, cryptography, privacy "
+        "and machine learning. Applicants must be enrolled in an eligible bachelor's or master's "
+        "programme and have completed at least four semesters before the internship begins. "
+        "International applicants are welcome. The application deadline is November 30, 2026. "
+        "[Apply now](https://career.cispa.de/application/2027)\\n"
+    )
+
+    class FakeTavily:
+        def __init__(self, api_key):
+            self.calls = []
+
+        def search(self, query, count=8):
+            return [{
+                "url": directory_url,
+                "title": "Research opportunities and resources",
+                "description": "Directory of research programmes.",
+                "score": 0.95,
+            }]
+
+        def extract(self, urls):
+            self.calls.append(list(urls))
+            if directory_url in urls:
+                return {directory_url: directory_markdown}
+            if programme_url in urls:
+                return {programme_url: programme_markdown}
+            return {}
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(discovery, "TavilySearch", FakeTavily)
+    monkeypatch.setattr(discovery.settings, "tavily_api_key", "test-key")
+    monkeypatch.setattr(discovery.settings, "max_search_queries_per_run", 3)
+    monkeypatch.setattr(discovery.settings, "max_pages_per_run", 8)
+
+    profile = SimpleNamespace(
+        intake_year=2027,
+        intake_season="Summer",
+        interests_json=json.dumps(["Information Security"]),
+        preferred_countries_json=json.dumps(["Germany"]),
+        funding_preference="any",
+        degree="Bachelor of Science",
+        current_year="3rd year",
+        current_semester=5,
+        graduation_year=2028,
+        citizenship="Pakistan",
+        gender="Man",
+        cgpa=3.5,
+        cgpa_scale=4.0,
+    )
+    results = discovery.discover_for_profile(profile)
+    assert len(results) == 1
+    result = results[0]
+    assert result.institution == "CISPA Helmholtz Center for Information Security"
+    assert result.program_name == "CISPA Summer Research (CSR) Internship Program 2027"
+    assert result.deadline == date(2026, 11, 30)
+    assert result.domains == ["Information Security"]
+    assert result.intake_confirmed is True
+    assert str(result.application_url) == "https://career.cispa.de/application/2027"
+    assert "directory" not in result.program_name.lower()
+
+
+def test_stale_2026_page_is_not_promoted_as_2027_programme():
+    import json
+    from types import SimpleNamespace
+    from app.discovery import extract_candidate
+
+    profile = SimpleNamespace(
+        intake_year=2027,
+        intake_season="Summer",
+        interests_json=json.dumps(["Information Security"]),
+        preferred_countries_json=json.dumps(["Germany"]),
+        funding_preference="any",
+        degree="Bachelor of Science",
+        current_year="3rd year",
+        current_semester=5,
+        graduation_year=2028,
+        citizenship="Pakistan",
+        gender="Man",
+        cgpa=3.5,
+        cgpa_scale=4.0,
+    )
+    old_page = (
+        "# Summer 2026 Undergraduate Cybersecurity Research Fellowship\\n"
+        + ("This was a 2026 research programme for undergraduate students. " * 12)
+        + "[Apply now](https://apply.example.edu/2026)\\n"
+    )
+    assert extract_candidate({
+        "url": "https://security.example.edu/research/fellowship-2026",
+        "title": "Summer 2026 Undergraduate Cybersecurity Research Fellowship",
+        "description": old_page,
+        "raw_content": old_page,
+        "score": 0.9,
+    }, profile) is None
+
+
+def test_notion_directory_cleanup_targets_roundups_not_specific_programmes():
+    from app.notion import _is_legacy_directory_record
+
+    assert _is_legacy_directory_record(
+        "Scholarships & Grants for Your Internship Abroad (2026) | Go Overseas",
+        "https://www.gooverseas.com/blog/internship-abroad-scholarships-grants",
+    )
+    assert _is_legacy_directory_record(
+        "Summer Research Programs | Office of Undergraduate Research and Fellowships",
+        "https://uraf.harvard.edu/summer-research-programs",
+    )
+    assert not _is_legacy_directory_record(
+        "CISPA Summer Research Internship Program",
+        "https://career.cispa.de/internship",
+    )
