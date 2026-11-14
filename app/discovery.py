@@ -995,7 +995,19 @@ def extract_candidate(result: dict, profile: UserProfile) -> DiscoveredOpportuni
     year = profile.intake_year
     # Avoid unrelated content when the page explicitly names a different intake year.
     years = [int(y) for y in re.findall(r"\b20\d{2}\b", content)]
-    if years and year not in years and not any(y == year - 1 for y in years):
+    cycle_text = f"{title} {content}".lower()
+    seasons = r"summer|winter|spring|autumn|fall"
+    target_confirmed = any(re.search(pattern, cycle_text, re.I) for pattern in [
+        rf"\b(?:{seasons})\s+{year}\b",
+        rf"\b{year}\s+(?:{seasons})\b",
+        rf"\b(?:intake|cohort)\s+(?:for\s+)?{year}\b",
+        rf"\bfor\s+(?:the\s+)?{year}\s+(?:intake|cohort)\b",
+        rf"\b(?:applications?|program|internship|fellowship)\s+for\s+{year}\b",
+    ])
+    # A page from the previous cycle is not a 2027 opportunity merely because
+    # it is a year old. Accept a 2026 deadline only when the page explicitly
+    # identifies the 2027 intake/cohort.
+    if years and year not in years and not target_confirmed:
         return None
     interests = json.loads(profile.interests_json or "[]")
     # Classify the programme from its title and the beginning of the main
@@ -1035,17 +1047,7 @@ def extract_candidate(result: dict, profile: UserProfile) -> DiscoveredOpportuni
     country = _extract_country(content)
     eligibility = _eligibility(content, profile)
     eligibility_details = _eligibility_breakdown(content, profile)
-    # Confirm the target cycle only when the year appears in intake/season
-    # context; a copyright footer or unrelated date must not validate the cycle.
-    cycle_text = f"{title} {content}".lower()
-    seasons = r"summer|winter|spring|autumn|fall"
-    target_confirmed = any(re.search(pattern, cycle_text, re.I) for pattern in [
-        rf"\b(?:{seasons})\s+{year}\b",
-        rf"\b{year}\s+(?:{seasons})\b",
-        rf"\b(?:intake|cohort)\s+(?:for\s+)?{year}\b",
-        rf"\bfor\s+(?:the\s+)?{year}\s+(?:intake|cohort)\b",
-        rf"\b(?:applications?|program|internship|fellowship)\s+for\s+{year}\b",
-    ])
+    # target_confirmed was determined before the year guard.
     chosen_application_url = canonicalize_url(discovered_apply_url or "")
     if not chosen_application_url:
         return None
