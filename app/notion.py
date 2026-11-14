@@ -592,6 +592,108 @@ def sync_discovered_candidate(context: NotionSyncContext, candidate) -> str | No
     return page_id
 
 
+DIRECTORY_SOURCE_HOSTS = {
+    "gooverseas.com",
+    "scholarshiproar.com",
+    "scholarshippositions.com",
+    "scholarshipbob.com",
+    "scholarshipregion.com",
+    "opportunitiesforafricans.com",
+    "opportunitiescorners.com",
+    "fullyfundedscholarships.com",
+}
+
+
+def _notion_property_text(properties: dict, name: str) -> str:
+    prop = properties.get(name) or {}
+    if prop.get("type") == "url" or "url" in prop:
+        return str(prop.get("url") or "")
+    values = prop.get("title") or prop.get("rich_text") or []
+    return " ".join(
+        str(item.get("plain_text") or item.get("text", {}).get("content") or "")
+        for item in values
+    ).strip()
+
+
+def _is_legacy_directory_record(title: str, source_url: str) -> bool:
+    host = (urlparse(source_url).hostname or "").lower().removeprefix("www.")
+    if any(host == item or host.endswith("." + item) for item in DIRECTORY_SOURCE_HOSTS):
+        return True
+    low = (title or "").lower()
+    return (
+        "scholarships & grants for your internship abroad" in low
+        or "office of undergraduate research and fellowships" in low
+        or low.strip() in {"summer research programs", "research opportunities and resources"}
+    )
+
+
+def cleanup_legacy_directory_pages(context: NotionSyncContext, max_pages: int = 200) -> int:
+    """Downgrade old directory records to clearly labelled resources; never delete user data."""
+    flagged = 0
+    cursor = None
+    visited = 0
+    while visited < max_pages:
+        payload = {"page_size": min(100, max_pages - visited)}
+        if cursor:
+            payload["start_cursor"] = cursor
+        result = _request(
+            "POST",
+            f"/data_sources/{context.data_source_id}/query",
+            token=context.access_token,
+            json=payload,
+        )
+        rows = result.get("results", [])
+        if not rows:
+            break
+        for page in rows:
+            visited += 1
+            page_id = page.get("id")
+            props = page.get("properties", {})
+            title = _notion_property_text(props, "Program Name")
+            source_url = _notion_property_text(props, "Official Source URL")
+            if not page_id or not _is_legacy_directory_record(title, source_url):
+                continue
+            # Preserve Application Status and the original Official Source URL.
+            # Remove only fields that made the resource page appear to be an
+            # individual scholarship or programme.
+            reason = (
+                "Directory/resource page, not an individually verified research programme. "
+                "The original source is retained for reference; no programme-specific "
+                "deadline, funding, stipend, eligibility or application portal was verified."
+            )
+            updates = {
+                "Program Name": {"title": _rt(f"RESOURCE — Not a specific opportunity: {title[:250]}")},
+                "Institution": {"rich_text": _rt("Not identified")},
+                "Country / Location": {"rich_text": _rt("Not specified")},
+                "Academic Domain": {"multi_select": []},
+                "Funding Type": {"select": {"name": "Not Disclosed"}},
+                "Funding Details": {"rich_text": _rt(reason)},
+                "Stipend": {"rich_text": _rt("Not verified")},
+                "Tuition Waiver": {"rich_text": _rt("Not verified")},
+                "Travel Grant": {"rich_text": _rt("Not verified")},
+                "Housing": {"rich_text": _rt("Not verified")},
+                "Application Deadline": {"date": None},
+                "Deadline Notes": {"rich_text": _rt("No programme-specific deadline verified.")},
+                "Application URL": {"url": None},
+                "Eligibility": {"select": {"name": "Unknown"}},
+                "Gender Requirement": {"rich_text": _rt("Not verified")},
+                "Citizenship Requirement": {"rich_text": _rt("Not verified")},
+                "Verification Status": {"select": {"name": "Needs Review"}},
+                "Relevance Score": {"number": 0},
+                "Intake Confirmed": {"checkbox": False},
+                "Opportunity Status": {"select": {"name": "Unknown"}},
+            }
+            _request(
+                "PATCH", f"/pages/{page_id}", token=context.access_token,
+                json={"properties": updates},
+            )
+            flagged += 1
+        if not result.get("has_more") or not result.get("next_cursor"):
+            break
+        cursor = result["next_cursor"]
+    return flagged
+
+
 def trash_notion_page(context: NotionSyncContext, page_id: str) -> None:
     """Move a retained Notion page to Trash using the current API field."""
     _request(
