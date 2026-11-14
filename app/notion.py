@@ -9,7 +9,7 @@ import uuid
 from dataclasses import dataclass
 from types import SimpleNamespace
 from datetime import datetime, timedelta, timezone
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 
 import httpx
 from fastapi import HTTPException
